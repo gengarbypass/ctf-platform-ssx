@@ -1,10 +1,13 @@
-FROM python:3.13-slim-bookworm
+ARG CTF_PYTHON_IMAGE=python:3.13-slim-bookworm
+FROM ${CTF_PYTHON_IMAGE}
+
+ARG CTF_PIP_INDEX_URL=https://pypi.org/simple
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 CTF_DATA_DIR=/data
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt \
+RUN pip install --no-cache-dir --disable-pip-version-check --index-url "$CTF_PIP_INDEX_URL" -r requirements.txt \
     && mkdir -p /data \
     && chown 10001:10001 /data
 

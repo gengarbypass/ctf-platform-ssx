@@ -7,7 +7,25 @@
 - 两块大屏各有独立入口。解题大屏展示领奖台与解出动态，回合大屏展示回合计分、服务状态与得分流水。前三名显示金、银、铜奖杯，大屏支持自动刷新、暂停和浏览器全屏。
 - 平台名称、图标、Logo、颜色和圆角可在「品牌与外观」修改。当前比赛的背景图、标题、简介和赛程由「比赛配置」管理。登录页和比赛首页读取当前开启的比赛。
 
-## Docker 部署
+## 阿里云 ECS 一键部署
+
+使用带公网 IPv4 或弹性公网 IP（EIP）的 Linux ECS。实例能访问 GitHub 和镜像源后，在服务器上运行下面的命令。私有仓库可使用已授权的 SSH 克隆地址。
+
+```bash
+git clone https://github.com/gengarbypass/ctf-platform-ssx.git
+cd ctf-platform-ssx
+sudo bash deploy.sh 8000
+```
+
+脚本会构建并启动平台，将所选 TCP 端口发布到 `0.0.0.0`，并检查健康接口。首次运行会创建 `.env`，其中保存初始账号 `arenaops` 和随机密码。已有 `.env` 和数据库继续使用。Ubuntu、Debian 和 Alibaba Cloud Linux 3 缺少 Docker 组件时，脚本会从软件源安装。其他 Linux 系统可预装 Docker Engine、Buildx 和 Compose 插件后运行。[Alibaba Cloud Linux 3 安装 Docker](https://help.aliyun.com/zh/document_detail/2842585.html) · [Docker Compose 插件安装](https://docs.docker.com/compose/install/linux/)
+
+在 **ECS 控制台 → 实例关联的安全组 → 入方向** 添加允许规则，协议选自定义 TCP，目的端口填 `8000`。授权对象填需要访问的公网 IP 段。若要向所有 IPv4 来源公开，填 `0.0.0.0/0`。实例启用系统防火墙时，也按同一访问范围放行所选端口。然后从实例外访问 `http://ECS公网IPv4:8000`。此入口使用 HTTP。[阿里云安全组说明](https://help.aliyun.com/zh/ecs/user-guide/start-using-security-groups)
+
+需要换端口时，运行 `sudo bash deploy.sh 8080`，并同步调整安全组。脚本将部署端口写入 `.env.ecs`。更新时在同一目录拉取新版，再运行 `sudo bash deploy.sh`，沿用上次端口和数据卷。脚本可从 ECS 元数据识别公网 IPv4，用于显示访问地址。
+
+如果实例所在地域拉取基础镜像有困难，在 `.env` 将 `CTF_PYTHON_IMAGE` 设置为可达的官方 Python 基础镜像副本，例如同步到本地域 ACR 的镜像。Python 依赖可用 `CTF_PIP_INDEX_URL` 指定镜像源。修改后重新运行部署脚本。[阿里云镜像拉取说明](https://help.aliyun.com/zh/acr/user-guide/accelerate-the-pulls-of-docker-official-images)
+
+## 手动 Docker 部署
 
 1. 把项目源码放到服务器，在项目根目录运行 `cp .env.example .env`。
 2. 编辑 `.env`，为 `CTF_ADMIN_PASSWORD` 设置至少 12 个字符的随机密码。
@@ -34,6 +52,8 @@
 | `CTF_WEB_WORKERS` | `2` | Gunicorn 进程数 |
 | `CTF_WEB_THREADS` | `4` | 每个 Gunicorn 进程的线程数 |
 | `CTF_DATA_DIR` | `data` | 本地运行数据目录。Compose 内为 `/data` |
+| `CTF_PYTHON_IMAGE` | `python:3.13-slim-bookworm` | 构建使用的 Python 基础镜像 |
+| `CTF_PIP_INDEX_URL` | `https://pypi.org/simple` | 构建使用的 Python 软件源 |
 
 ## 计分与提交
 
@@ -43,7 +63,7 @@ Flag 按题目分值一次性给本队计分。重复判定和未通过判定保
 
 ## 数据与维护
 
-SQLite 数据库、比赛配置、账号、积分、提交记录和上传文件都保存在 Compose 命名卷 `data` 的 `/data/arena.sqlite3` 中。采用单应用实例部署，容器内可以运行多个 Web 进程。升级时运行 `docker compose up -d --build`，并保留该数据卷。
+SQLite 数据库、比赛配置、账号、积分、提交记录和上传文件都保存在 Compose 命名卷 `data` 的 `/data/arena.sqlite3` 中。采用单应用实例部署，容器内可以运行多个 Web 进程。一键部署的实例用 `sudo bash deploy.sh` 更新，手动部署的实例用 `docker compose up -d --build` 更新。两种方式均使用同一项目的数据卷。
 
 运行中可使用 SQLite 的备份接口生成一致的数据库副本：
 

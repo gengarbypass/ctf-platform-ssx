@@ -7,3 +7,4 @@ __pycache__/
 data/
 *.sqlite3*
 tests/
+.deploy.lock
