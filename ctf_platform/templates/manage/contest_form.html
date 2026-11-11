@@ -4,15 +4,24 @@
   <div class="arena-back">{{ ui.link("返回比赛配置", url_for('manage.contests'), "link", "back") }}</div>
   {{ ui.heading(title, "赛程时区 " ~ timezone) }}
   {% call ui.panel("比赛信息") %}
-    <form class="arena-form arena-form-narrow" method="post" enctype="multipart/form-data" data-image-form>
+    <form class="arena-form arena-form-narrow" method="post" enctype="multipart/form-data" data-image-form data-contest-form>
       {{ ui.csrf() }}
+      {% set mode = contest.mode if contest else 'puzzle' %}
+      {% if contest and contest.active %}
+        <input type="hidden" name="mode" value="{{ mode }}">
+        <div class="arena-field">比赛类型 <span>{{ ui.pill(contest_modes[mode]) }}</span><small>撤下比赛后可修改类型。</small></div>
+      {% else %}
+        {{ ui.select("比赛类型", "mode", contest_modes.items(), mode) }}
+      {% endif %}
       {{ ui.field("比赛标题","title",contest.title if contest else '',max=80) }}
       {{ ui.description("比赛简介","summary",contest.summary if contest else '',rows=3,max=1000) }}
       <div class="arena-two">
         {{ ui.field("开赛时间","start_at",local_time(contest.start_at,'%Y-%m-%dT%H:%M') if contest else '',type='datetime-local') }}
         {{ ui.field("结束时间","end_at",local_time(contest.end_at,'%Y-%m-%dT%H:%M') if contest else '',type='datetime-local') }}
       </div>
-      {{ ui.field("每回合分钟数","round_minutes",contest.round_seconds//60 if contest else 15,type='number',min=1,maximum=1440) }}
+      {% if not contest or not contest.active or mode == 'round' %}
+        <div data-round-duration>{{ ui.field("AWDP 每回合分钟数","round_minutes",contest.round_seconds//60 if contest else 15,type='number',min=1,maximum=1440,required=false) }}</div>
+      {% endif %}
       <label class="arena-field">比赛背景图<input class="arena-input" type="file" name="cover" accept="image/png,image/jpeg,image/webp" data-image-input><small>显示在登录页和比赛首页。</small></label>
       <img class="arena-cover-preview" alt="比赛背景图预览" data-image-preview{% if contest and contest.cover_id %} src="{{ url_for('site.image', file_id=contest.cover_id) }}"{% else %} hidden{% endif %}>
       {% if contest and contest.cover_id %}<label class="arena-checkbox"><input type="checkbox" name="remove_cover" value="1" data-remove-image>移除背景图</label>{% endif %}

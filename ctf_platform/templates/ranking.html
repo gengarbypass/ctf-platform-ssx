@@ -1,13 +1,9 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("排行榜", "按比赛模式查看队伍排名与积分。") %}
+  {% call ui.heading("排行榜", g.contest.title if g.contest else "") %}
     {{ ui.link("计分板大屏", url_for('site.scoreboard', kind=kind), "primary", "screen") }}
   {% endcall %}
-  <nav class="arena-tabs" aria-label="榜单导航">
-    <a href="{{ url_for('site.ranking', kind='puzzle') }}"{% if kind == 'puzzle' %} aria-current="page"{% endif %}>解题排行</a>
-    <a href="{{ url_for('site.ranking', kind='round') }}"{% if kind == 'round' %} aria-current="page"{% endif %}>AWDP 排行</a>
-  </nav>
   {% call ui.panel("队伍排名") %}
     {% if standings %}
     <div class="arena-table-wrap"><table class="arena-table"><caption>队伍排名</caption>

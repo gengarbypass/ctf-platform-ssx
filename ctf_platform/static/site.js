@@ -79,6 +79,21 @@ for (const form of document.querySelectorAll("[data-image-form]")) {
   remove?.addEventListener("change", updateImage);
 }
 
+const contestForm = document.querySelector("[data-contest-form]");
+const roundDuration = contestForm?.querySelector("[data-round-duration]");
+if (roundDuration) {
+  const mode = contestForm.elements.namedItem("mode");
+  const minutes = contestForm.elements.namedItem("round_minutes");
+  function updateRoundDuration() {
+    const isRound = mode.value === "round";
+    roundDuration.hidden = !isRound;
+    minutes.disabled = !isRound;
+    minutes.required = isRound;
+  }
+  mode.addEventListener("change", updateRoundDuration);
+  updateRoundDuration();
+}
+
 const editor = document.querySelector("[data-brand-editor]");
 if (editor) {
   const preview = editor.querySelector("[data-brand-preview]");

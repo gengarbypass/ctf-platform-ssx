@@ -9,6 +9,8 @@ from flask import abort, current_app, g, redirect, request, url_for
 
 CATEGORIES = ("Web", "Crypto", "Reverse", "Pwn", "Misc")
 DIFFICULTIES = ("入门", "进阶", "挑战")
+CONTEST_MODES = {"puzzle": "解题赛", "round": "AWDP"}
+CHALLENGE_TABLES = {"puzzle": "puzzles", "round": "round_tasks"}
 SERVICE_STATES = {
     "healthy": "正常",
     "unhealthy": "异常",

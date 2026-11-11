@@ -28,12 +28,21 @@
       <div class="arena-side-label">{{ '工作台' if admin else '比赛' }}</div>
       <nav class="arena-nav" aria-label="页面导航">
         {% if admin %}
-          {% set items = [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题目管理','manage.challenges','/manage/challenges','list'),('队伍与服务','manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
+          {% set managed_mode = g.managed.mode if g.managed else 'puzzle' %}
+          {% set teams_label = '队伍与服务' if managed_mode == 'round' else '队伍管理' %}
+          {% set items = [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题目管理','manage.challenges','/manage/challenges','list'),(teams_label,'manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
         {% else %}
-          {% set items = [('比赛首页','site.home','/','home'),('解题模式','site.puzzles','/challenges','flag'),('AWDP 模式','site.awdp','/awdp','shield'),('排行榜','site.ranking','/rankings','ranking'),('我的提交','site.records','/submissions','history')] %}
+          {% if g.contest and g.contest.mode == 'puzzle' %}
+            {% set items = [('比赛首页','site.puzzle_home','/puzzle','home'),('题库','site.puzzles','/challenges','flag')] %}
+          {% elif g.contest %}
+            {% set items = [('比赛首页','site.awdp','/awdp','home')] %}
+          {% else %}
+            {% set items = [('比赛首页','site.home','/','home')] %}
+          {% endif %}
+          {% if g.contest %}{% set items = items + [('排行榜','site.ranking','/rankings','ranking'),('我的提交','site.records','/submissions','history')] %}{% endif %}
         {% endif %}
         {% for label, endpoint, path, glyph in items %}
-          {% set destination = url_for(endpoint, kind='puzzle') if endpoint == 'manage.challenges' else url_for(endpoint) %}
+          {% set destination = url_for(endpoint, kind=managed_mode) if endpoint == 'manage.challenges' else url_for(endpoint) %}
           {% set active = request.path == path if path in ['/', '/manage/'] else request.path.startswith(path) or (endpoint == 'manage.submissions' and request.path.startswith('/manage/patches')) %}
           <a href="{{ destination }}"{% if active %} aria-current="page"{% endif %}>{{ ui.icon(glyph) }}{{ label }}</a>
         {% endfor %}

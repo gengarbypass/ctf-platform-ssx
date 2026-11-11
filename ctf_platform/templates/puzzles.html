@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("解题模式", "选择赛题，提交 Flag 后查看判定与积分。") %}
+  {% call ui.heading(title, "选择赛题，提交 Flag 后查看判定与积分。") %}
     {{ ui.link("我的提交", url_for('site.records'), "", "history") }}
     {{ ui.link("计分板大屏", url_for('site.scoreboard', kind='puzzle', **{'from':'challenges'}), "primary", "screen") }}
   {% endcall %}

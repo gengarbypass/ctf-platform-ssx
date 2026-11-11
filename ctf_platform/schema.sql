@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS contests (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
     summary TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round')),
     start_at INTEGER NOT NULL,
     end_at INTEGER NOT NULL CHECK (end_at > start_at),
     round_seconds INTEGER NOT NULL CHECK (round_seconds > 0),

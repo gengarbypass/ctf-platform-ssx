@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def connect(path):
@@ -52,10 +52,19 @@ def initialize(app):
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
             raise RuntimeError("数据库版本高于当前应用版本。")
-        if version < SCHEMA_VERSION:
+        if version == 0:
             schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
             connection.executescript(f"BEGIN IMMEDIATE;\n{schema}\nPRAGMA user_version = {SCHEMA_VERSION};\nCOMMIT;")
         with transaction(connection, write=True):
+            if connection.execute("PRAGMA user_version").fetchone()[0] == 1:
+                connection.execute("ALTER TABLE contests ADD COLUMN mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round'))")
+                connection.execute(
+                    """UPDATE contests SET mode = 'round'
+                       WHERE NOT EXISTS (SELECT 1 FROM puzzles WHERE contest_id = contests.id)
+                         AND (EXISTS (SELECT 1 FROM round_tasks WHERE contest_id = contests.id)
+                              OR EXISTS (SELECT 1 FROM score_events WHERE contest_id = contests.id))"""
+                )
+                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             connection.execute("INSERT OR IGNORE INTO site_settings (id) VALUES (1)")
             for key in ("session_key", "flag_key"):
                 connection.execute("INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)", (key, secrets.token_hex(32)))

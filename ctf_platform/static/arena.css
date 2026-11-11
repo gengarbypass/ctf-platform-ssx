@@ -132,7 +132,7 @@
   #lanyu-arena .arena-mode-card { position: relative; display: grid; align-content: start; gap: 12px; padding: 15px; color: var(--arena-ink); text-align: left; }
   #lanyu-arena .arena-mode-card:hover, #lanyu-arena .arena-task:hover { border-color: color-mix(in srgb, var(--arena-blue) 49%, white); box-shadow: 0 3px 14px #1c4a9912; }
   #lanyu-arena .arena-mode-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
-  #lanyu-arena .arena-mode-head h3 { font-size: 16px; font-weight: 730; }
+  #lanyu-arena .arena-mode-head h2 { font-size: 16px; font-weight: 730; }
   #lanyu-arena .arena-mode-head p { margin-top: 3px; font-size: 12px; color: var(--arena-muted); }
   #lanyu-arena .arena-icon-box { display: grid; place-items: center; flex: 0 0 auto; width: 39px; height: 39px; border-radius: 9px; background: var(--arena-soft); color: var(--arena-blue-ink); }
   #lanyu-arena .arena-icon-box.alt { background: #e8f4ff; color: #115caa; }
@@ -146,10 +146,6 @@
   #lanyu-arena .arena-notice strong { font-size: 12px; font-weight: 680; }
   #lanyu-arena .arena-notice p { margin-top: 2px; color: var(--arena-muted); font-size: 11px; }
   #lanyu-arena .arena-notice time { font-size: 11px; color: var(--arena-muted); }
-  #lanyu-arena .arena-home-score { display: grid; gap: 9px; padding: 0 15px 12px; }
-  #lanyu-arena .arena-home-score > div { display: flex; align-items: center; justify-content: space-between; gap: 6px; border-top: 1px solid var(--arena-border); padding-top: 9px; }
-  #lanyu-arena .arena-home-score strong { font-size: 16px; font-weight: 760; }
-  #lanyu-arena .arena-home-score small { margin-left: 4px; color: var(--arena-muted); font-size: 11px; }
   #lanyu-arena .arena-tabs { display: flex; gap: 4px 19px; flex-wrap: wrap; border-bottom: 1px solid var(--arena-border); }
   #lanyu-arena .arena-tabs button { background: transparent; color: var(--arena-muted); border: 0; border-bottom: 2px solid transparent; padding: 7px 1px 9px; font-size: 13px; font-weight: 650; white-space: nowrap; }
   #lanyu-arena .arena-tabs button:hover, #lanyu-arena .arena-tabs button[aria-pressed="true"] { color: var(--arena-blue-ink); }

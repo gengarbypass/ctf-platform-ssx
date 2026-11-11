@@ -1,23 +1,26 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("AWDP 模式", "查看比赛进程、队伍服务和补丁评测。") %}
-    {% if g.match %}{{ ui.pill(g.match.label, "success" if g.match.status == 'live' else "neutral") }}{% endif %}
-    {{ ui.link("计分板大屏", url_for('site.scoreboard', kind='round', **{'from':'awdp'}), "primary", "screen") }}
-  {% endcall %}
-  <nav class="arena-tabs" aria-label="赛场导航">
-    {% for key, label in [('live','赛场总览'),('tasks','攻防赛题'),('teams','队伍状态'),('patches','加固记录')] %}
-      <a href="{{ url_for('site.awdp', view=key) }}"{% if view == key %} aria-current="page"{% endif %}>{{ label }}</a>
-    {% endfor %}
-  </nav>
-  {% if not g.contest %}
-    {% call ui.panel("") %}{{ ui.empty("当前没有开启的比赛。") }}{% endcall %}
-  {% elif view == 'teams' %}
+  {% if view == 'live' or not g.contest %}{{ ui.hero(g.contest, g.match, empty_title='AWDP') }}{% endif %}
+  {% if g.contest and view == 'live' and not g.team and g.user.role == 'player' %}
+    <p class="arena-muted">请联系赛事人员为当前账号分配队伍。</p>
+  {% endif %}
+  {% if g.contest %}
+    <div class="arena-section-head">
+      <nav class="arena-tabs" aria-label="赛场导航">
+        {% for key, label in [('live','赛场总览'),('tasks','攻防赛题'),('teams','队伍状态'),('patches','加固记录')] %}
+          <a href="{{ url_for('site.awdp', view=key) }}"{% if view == key %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
+      {{ ui.link("计分板大屏", url_for('site.scoreboard', kind='round', **{'from':'awdp'}), "primary", "screen") }}
+    </div>
+  {% endif %}
+  {% if g.contest and view == 'teams' %}
     {% call ui.panel("队伍与服务状态") %}{{ ui.service_table(data.matrix) }}{% endcall %}
-  {% elif view == 'patches' %}
+  {% elif g.contest and view == 'patches' %}
     {% call ui.panel("本队加固记录") %}{{ ui.patch_table(data.patches) }}{% endcall %}
     {{ ui.link("查看完整记录", url_for('site.records', kind='patch'), "link", "next") }}
-  {% else %}
+  {% elif g.contest %}
     {% if view == 'live' %}
       <section class="arena-panel arena-round">
         <div class="arena-round-head"><div><h2>比赛进程</h2><p>{% if g.match.round %}第 <strong>{{ g.match.round }}</strong> / {{ g.match.rounds }} 回合{% else %}共 {{ g.match.rounds }} 回合{% endif %}</p></div>
@@ -29,7 +32,7 @@
         </div>
         <div class="arena-round-labels"><span>{{ local_time(g.contest.start_at, '%m-%d %H:%M') }} 开赛</span><span>{{ local_time(g.contest.end_at, '%m-%d %H:%M') }} 结束</span></div>
       </section>
-      {% if g.team %}
+      {% if g.team and data.matrix %}
         {% set own = data.standings|selectattr('id','eq',g.team.id)|first|default(none) %}
         <div class="arena-kpis">
           <div class="arena-panel arena-kpi"><span>本队总分</span><strong>{{ '{:,}'.format(own.points if own else 0) }}</strong></div>

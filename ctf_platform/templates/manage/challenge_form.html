@@ -19,12 +19,13 @@
       {% else %}{{ ui.field("基线版本","baseline",task.baseline if task else '',max=80) }}{% endif %}
       {{ ui.description("题目说明","description",task.description if task else '',rows=6,max=16000,required=true) }}
       {% if kind == 'puzzle' %}
-        <label class="arena-field">题目附件<input class="arena-input" type="file" name="attachments" multiple><small>发布后，附件下载链接会出现在题目详情。</small></label>
+        <label class="arena-field">题目附件<input class="arena-input" type="file" name="attachments" multiple><small>赛题开放后，详情页会显示附件下载链接。</small></label>
         {% for file in files %}
           <div class="arena-attachment">{{ ui.link(file.name,url_for('site.download',file_id=file.id),"link","file") }}<label class="arena-checkbox"><input type="checkbox" name="remove_file" value="{{ file.id }}">移除</label></div>
         {% endfor %}
       {% endif %}
-      <label class="arena-checkbox"><input type="checkbox" name="published" value="1"{% if task and task.published %} checked{% endif %}>发布赛题</label>
+      <label class="arena-checkbox"><input type="checkbox" name="published" value="1"{% if task and task.published %} checked{% endif %}>开放赛题</label>
+      <small class="arena-muted">比赛开启且到达开赛时间后，开放的赛题会在题库显示。</small>
       <div class="arena-actions"><button class="arena-btn primary" type="submit">保存赛题</button>{{ ui.link("取消",url_for('manage.challenges',kind=kind)) }}</div>
     </form>
   {% endcall %}

@@ -61,17 +61,21 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(response.status_code, code, (path, response.get_data(as_text=True)[:350]))
         return response
 
-    def contest(self, title="蓝域杯 · 测试赛", *, upcoming=False, cover=False):
+    def contest(self, title="蓝域杯 · 测试赛", *, mode="puzzle", active=True, upcoming=False, cover=False):
         now = datetime.now(self.app.config["TIME_ZONE"])
         start = now + timedelta(hours=1) if upcoming else now - timedelta(minutes=5)
         end = now + timedelta(hours=2)
-        data = {"title": title, "summary": "赛题与回合赛况", "start_at": start.strftime("%Y-%m-%dT%H:%M"),
-                "end_at": end.strftime("%Y-%m-%dT%H:%M"), "round_minutes": "15"}
+        data = {"title": title, "mode": mode, "summary": "赛题与回合赛况", "start_at": start.strftime("%Y-%m-%dT%H:%M"),
+                "end_at": end.strftime("%Y-%m-%dT%H:%M")}
+        if mode == "round":
+            data["round_minutes"] = "15"
         if cover:
             data["cover"] = (png(), "cover.png")
-        self.post(self.admin, "/manage/contests/new", **data)
+        created = self.post(self.admin, "/manage/contests/new", **data)
+        self.assertEqual(created.location, f"/manage/challenges/{mode}")
         contest_id = self.lookup("SELECT id FROM contests WHERE title = ?", (title,))[0][0]
-        self.post(self.admin, f"/manage/contests/{contest_id}/activate")
+        if active:
+            self.post(self.admin, f"/manage/contests/{contest_id}/activate")
         return contest_id
 
     def player(self, contest_id, username, team_name):
@@ -99,15 +103,21 @@ class PlatformTest(unittest.TestCase):
         public = self.app.test_client()
         self.assertEqual(public.get("/healthz").json, {"status": "ok"})
         self.assertEqual(public.get("/api/login-presentation").json["cover"], "")
+        self.assertEqual(public.get("/puzzle").location, "/login?mode=puzzle")
+        self.assertEqual(public.get("/awdp").location, "/login?mode=round")
         first = self.contest(cover=True)
         before = public.get("/api/login-presentation").json
         self.assertIn("测试赛", before["title"])
         self.assertEqual(public.get(before["cover"]).mimetype, "image/png")
-        self.contest("蓝域杯 · 总决赛", cover=True)
+        self.assertEqual(public.get("/api/login-presentation?mode=puzzle").json, before)
+        self.assertEqual(public.get("/api/login-presentation?mode=round").json["cover"], "")
+        self.contest("蓝域杯 · 总决赛", mode="round", cover=True)
         after = public.get("/api/login-presentation").json
         self.assertIn("总决赛", after["title"])
         self.assertNotEqual(before["cover"], after["cover"])
         self.assertEqual(public.get(before["cover"]).status_code, 404)
+        self.assertEqual(public.get("/api/login-presentation?mode=round").json, after)
+        self.assertEqual(public.get("/api/login-presentation?mode=puzzle").json["cover"], "")
         self.assertEqual(self.admin.post(f"/manage/contests/{first}/activate").status_code, 400)
         self.assertEqual(public.get("/api/login-presentation").json["title"], after["title"])
 
@@ -146,7 +156,7 @@ class PlatformTest(unittest.TestCase):
         self.assertNotIn("flag{fixture}", ranking)
 
     def test_patch_review_score_reversal_status_and_file_access(self):
-        contest_id = self.contest()
+        contest_id = self.contest(mode="round")
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")
         other, _ = self.player(contest_id, "packetlab", "PacketLab")
         task_id = self.round_task(contest_id)
@@ -197,7 +207,12 @@ class PlatformTest(unittest.TestCase):
         for team in ("BlueFox", "NullByte", "PacketLab"):
             self.post(self.admin, "/manage/teams/new", contest_id=contest_id, name=team)
         puzzle = self.admin.get("/scoreboard/puzzle").get_data(as_text=True)
+        self.assertIsNone(self.admin.get("/api/scoreboard/round").json["timing"]["id"])
+        contest_id = self.contest("蓝域杯 · 回合赛", mode="round")
+        for team in ("BlueFox", "NullByte", "PacketLab"):
+            self.post(self.admin, "/manage/teams/new", contest_id=contest_id, name=team)
         rounds = self.admin.get("/scoreboard/round").get_data(as_text=True)
+        self.assertIsNone(self.admin.get("/api/scoreboard/puzzle").json["timing"]["id"])
         for page in (puzzle, rounds):
             self.assertNotIn("解题模式", page)
             self.assertNotIn("AWDP", page)
@@ -207,3 +222,78 @@ class PlatformTest(unittest.TestCase):
         self.assertNotIn("服务状态", puzzle)
         self.assertIn("本回合剩余", rounds)
         self.assertIn("服务状态", rounds)
+
+    def test_manage_unopened_contests_and_switch_entries(self):
+        puzzle_contest = self.contest(active=False)
+        puzzle_id = self.puzzle(puzzle_contest)
+        file_id = self.lookup("SELECT file_id FROM puzzle_files WHERE puzzle_id = ?", (puzzle_id,))[0][0]
+        download = f"/downloads/{file_id}"
+        self.assertIn("待开放", self.admin.get("/manage/challenges/puzzle").get_data(as_text=True))
+        self.assertEqual(self.admin.get(download).data, b"Navigation sample")
+        player, _ = self.player(puzzle_contest, "bluefox", "BlueFox")
+        self.assertEqual(player.get(download).status_code, 404)
+        self.assertEqual(player.get(f"/challenges/{puzzle_id}").status_code, 404)
+        self.post(self.admin, f"/manage/contests/{puzzle_contest}/activate")
+        self.assertEqual(player.get("/").location, "/puzzle")
+        self.assertEqual(player.get(download).status_code, 200)
+
+        round_contest = self.contest("蓝域杯 · 回合赛", mode="round", active=False)
+        self.post(self.admin, f"/manage/contests/{puzzle_contest}/select")
+        result = self.post(self.admin, f"/manage/contests/{round_contest}/select", section="challenges")
+        self.assertEqual(result.location, "/manage/challenges/round")
+        task_id = self.round_task(round_contest)
+        self.post(self.admin, f"/manage/challenges/round/{task_id}/edit", contest_id=round_contest,
+                  title="档案检索新版", baseline="v1.1", description="更新服务说明。", published="1")
+        task_list = self.admin.get(result.location).get_data(as_text=True)
+        self.assertIn("未开启 · 筹备中", task_list)
+        self.assertIn("档案检索新版", task_list)
+        self.assertIn("待开放", task_list)
+        self.assertEqual(self.admin.get("/manage/challenges/puzzle").status_code, 404)
+        detail = f"/awdp/challenges/{task_id}"
+        waiting = player.get("/awdp").get_data(as_text=True)
+        self.assertNotIn("测试赛", waiting)
+        self.assertNotIn("回合赛", waiting)
+        self.assertEqual(player.get(detail).status_code, 404)
+        self.assertEqual(player.get(f"/challenges/{puzzle_id}").status_code, 200)
+
+        self.post(self.admin, f"/manage/contests/{round_contest}/activate")
+        self.assertEqual(self.lookup("SELECT id FROM contests WHERE active = 1")[0][0], round_contest)
+        self.assertEqual(player.get("/").location, "/awdp")
+        self.assertIn("档案检索新版", player.get(detail).get_data(as_text=True))
+        self.assertNotIn("回合赛", player.get("/puzzle").get_data(as_text=True))
+        self.assertEqual(player.get(f"/challenges/{puzzle_id}").status_code, 404)
+        self.assertEqual(player.get(download).status_code, 404)
+        self.assertEqual(player.get("/rankings?kind=puzzle").status_code, 404)
+        self.assertEqual(player.get("/submissions?kind=flag").status_code, 404)
+        scoped = self.app.test_client()
+        self.assertIn("AWDP", scoped.get("/login?mode=round").get_data(as_text=True))
+        response = self.post(scoped, "/login?mode=round", code=302, username="bluefox", password=self.password)
+        self.assertEqual(response.location, "/awdp")
+
+    def test_upgrade_legacy_contests_preserves_challenges(self):
+        mixed = self.contest(active=False)
+        self.puzzle(mixed)
+        rounds = self.contest("蓝域杯 · 回合赛", mode="round")
+        self.round_task(rounds)
+        with closing(connect(self.app.config["DATABASE"])) as db:
+            db.execute(
+                "INSERT INTO round_tasks (contest_id, title, baseline, description) VALUES (?, ?, ?, ?)",
+                (mixed, "旧回合赛题", "v1.0", "存档说明"),
+            )
+            db.execute("ALTER TABLE contests DROP COLUMN mode")
+            db.execute("PRAGMA user_version = 1")
+
+        upgraded = create_app({**self.settings, "ADMIN_PASSWORD": ""})
+        admin = self.login("arenaops", upgraded)
+        self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active FROM contests ORDER BY id")],
+                         [(mixed, "puzzle", 0), (rounds, "round", 1)])
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 2)
+        self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
+        self.assertEqual(len(self.lookup("SELECT id FROM round_tasks")), 2)
+        contest = self.lookup("SELECT * FROM contests WHERE id = ?", (mixed,))[0]
+        timezone = upgraded.config["TIME_ZONE"]
+        self.post(admin, f"/manage/contests/{mixed}/edit", title=contest["title"], mode="round", round_minutes=15,
+                  start_at=datetime.fromtimestamp(contest["start_at"], timezone).strftime("%Y-%m-%dT%H:%M"),
+                  end_at=datetime.fromtimestamp(contest["end_at"], timezone).strftime("%Y-%m-%dT%H:%M"))
+        self.assertIn("旧回合赛题", admin.get("/manage/challenges/round").get_data(as_text=True))
+        self.assertEqual(self.lookup("SELECT id FROM contests WHERE active = 1")[0][0], rounds)

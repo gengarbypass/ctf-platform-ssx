@@ -1,20 +1,22 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("题目管理", g.managed.title if g.managed else "创建比赛后即可配置题库。") %}
-    {% if g.managed %}{{ ui.link("创建赛题", url_for('manage.challenge_edit',kind=kind), "primary", "plus") }}{% endif %}
+  {% call ui.heading("题目管理", g.managed.title ~ " · " ~ contest_modes[kind] if g.managed else "创建比赛后即可配置题库。") %}
+    {% if g.managed %}
+      {% if not g.managed.active %}{{ ui.pill("未开启 · 筹备中", "neutral") }}{% endif %}
+      {{ ui.link("创建赛题", url_for('manage.challenge_edit',kind=kind), "primary", "plus") }}
+    {% else %}
+      {{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}
+    {% endif %}
   {% endcall %}
-  <nav class="arena-tabs" aria-label="题库导航">
-    <a href="{{ url_for('manage.challenges',kind='puzzle') }}"{% if kind == 'puzzle' %} aria-current="page"{% endif %}>解题题库</a>
-    <a href="{{ url_for('manage.challenges',kind='round') }}"{% if kind == 'round' %} aria-current="page"{% endif %}>AWDP 赛题</a>
-  </nav>
+  {% set open = g.managed and g.managed.active and contest_state(g.managed,g.now).status != 'upcoming' %}
   {% call ui.panel("解题题库" if kind == 'puzzle' else "攻防赛题") %}
     {% if rows %}
     <div class="arena-table-wrap"><table class="arena-table"><caption>赛题管理</caption>
       <thead><tr><th scope="col">题目</th>{% if kind == 'puzzle' %}<th scope="col">分类</th><th scope="col">分值</th>{% else %}<th scope="col">基线版本</th>{% endif %}<th scope="col">发布状态</th><th scope="col">操作</th></tr></thead>
       <tbody>{% for row in rows %}<tr>
         <td><strong>{{ row.title }}</strong></td>{% if kind == 'puzzle' %}<td>{{ row.category }}</td><td>{{ row.points }}</td>{% else %}<td class="arena-mono">{{ row.baseline }}</td>{% endif %}
-        <td>{{ ui.pill("已发布" if row.published else "草稿","success" if row.published else "neutral") }}</td><td>{{ ui.link("编辑",url_for('manage.challenge_edit',kind=kind,task_id=row.id),"link") }}</td>
+        <td>{{ ui.pill(("已开放" if open else "待开放") if row.published else "草稿","success" if row.published and open else "neutral") }}</td><td>{{ ui.link("编辑",url_for('manage.challenge_edit',kind=kind,task_id=row.id),"link") }}</td>
       </tr>{% endfor %}</tbody>
     </table></div>
     {% else %}{{ ui.empty("暂无赛题。") }}{% endif %}

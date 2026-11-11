@@ -3,10 +3,6 @@
 {% block content %}
   {{ ui.heading(title, g.managed.title if admin and g.managed else g.team.name if g.team else '') }}
   {% set endpoint = 'manage.submissions' if admin else 'site.records' %}
-  <nav class="arena-tabs" aria-label="提交类型">
-    <a href="{{ url_for(endpoint, kind='flag') }}"{% if kind == 'flag' %} aria-current="page"{% endif %}>Flag 记录</a>
-    <a href="{{ url_for(endpoint, kind='patch') }}"{% if kind == 'patch' %} aria-current="page"{% endif %}>补丁记录</a>
-  </nav>
   {% call ui.panel("Flag 提交" if kind == 'flag' else "补丁提交") %}
     {% if kind == 'flag' %}{{ ui.flag_table(rows, admin) }}{% else %}{{ ui.patch_table(rows, admin) }}{% endif %}
   {% endcall %}

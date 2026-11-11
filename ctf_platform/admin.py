@@ -6,23 +6,25 @@ from werkzeug.security import generate_password_hash
 
 from .db import get_db, transaction
 from .domain import (
-    CATEGORIES, DIFFICULTIES, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError, admin_required,
+    CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, DIFFICULTIES, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError, admin_required,
     choice_field, contest_state, integer_field, new_flag, parse_local_time, text_field, username_value, validate_password,
 )
 from .queries import add_score, flag_records, patch_records, score_records, service_matrix, team_list
 from .storage import read_upload, save_upload
-from .views import PAGE_SIZE, page_number
+from .views import PAGE_SIZE, page_number, records_kind
 
 
 manage = Blueprint("manage", __name__, url_prefix="/manage")
 
 
-def managed_id():
+def managed_id(mode=None):
     if not g.managed:
         raise FormError("请先创建比赛。")
     contest_id = g.managed["id"]
     if request.method == "POST" and request.form.get("contest_id", type=int) != contest_id:
         raise FormError("当前编辑的比赛已切换，请重新打开表单。")
+    if mode and get_db().execute("SELECT mode FROM contests WHERE id = ?", (contest_id,)).fetchone()["mode"] != mode:
+        abort(404)
     return contest_id
 
 
@@ -46,14 +48,17 @@ def overview():
     if g.managed:
         db = get_db()
         contest_id = g.managed["id"]
-        for key, sql in {
-            "teams": "SELECT COUNT(*) FROM teams WHERE contest_id = ?",
-            "puzzles": "SELECT COUNT(*) FROM puzzles WHERE contest_id = ? AND published = 1",
-            "round_tasks": "SELECT COUNT(*) FROM round_tasks WHERE contest_id = ? AND published = 1",
-            "pending": "SELECT COUNT(*) FROM patches WHERE contest_id = ? AND status IN ('pending', 'testing')",
-        }.items():
-            metrics[key] = db.execute(sql, (contest_id,)).fetchone()[0]
-        patches = patch_records(db, contest_id, limit=5)
+        mode = g.managed["mode"]
+        table = CHALLENGE_TABLES[mode]
+        metrics["teams"] = db.execute("SELECT COUNT(*) FROM teams WHERE contest_id = ?", (contest_id,)).fetchone()[0]
+        metrics["challenges"] = db.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE contest_id = ? AND published = 1", (contest_id,),
+        ).fetchone()[0]
+        if mode == "round":
+            metrics["pending"] = db.execute(
+                "SELECT COUNT(*) FROM patches WHERE contest_id = ? AND status IN ('pending', 'testing')", (contest_id,),
+            ).fetchone()[0]
+            patches = patch_records(db, contest_id, limit=5)
     return render_template("manage/overview.html", title="赛事总览", metrics=metrics, patches=patches)
 
 
@@ -74,11 +79,12 @@ def contest_edit(contest_id):
         abort(404)
     if request.method == "GET":
         return render_template("manage/contest_form.html", title="编辑比赛" if contest else "创建比赛", contest=contest)
+    mode = choice_field("mode", "比赛类型", CONTEST_MODES)
     title = text_field("title", "比赛标题", 80)
     summary = text_field("summary", "比赛简介", 1000, optional=True)
     start_at = parse_local_time("start_at", "开赛时间")
     end_at = parse_local_time("end_at", "结束时间")
-    round_seconds = integer_field("round_minutes", "回合分钟数", 1, 1440) * 60
+    round_seconds = integer_field("round_minutes", "回合分钟数", 1, 1440) * 60 if mode == "round" else 15 * 60
     if end_at <= start_at:
         raise FormError("结束时间须晚于开赛时间。")
     cover = read_upload(request.files.get("cover"), "cover")
@@ -86,6 +92,10 @@ def contest_edit(contest_id):
     with transaction(db, write=True):
         if contest:
             contest = db.execute("SELECT * FROM contests WHERE id = ?", (contest_id,)).fetchone()
+            if contest["active"] and mode != contest["mode"]:
+                raise FormError("请先撤下比赛，再修改比赛类型。")
+            if mode == "puzzle":
+                round_seconds = contest["round_seconds"]
             last_round = db.execute("SELECT MAX(round_no) FROM score_events WHERE contest_id = ?", (contest_id,)).fetchone()[0]
             if last_round and (
                 start_at != contest["start_at"] or round_seconds != contest["round_seconds"]
@@ -94,20 +104,23 @@ def contest_edit(contest_id):
                 raise FormError("已有回合积分记录，请保留开赛时间、回合长度和已计分回合。")
         old_cover_id = contest["cover_id"] if contest else None
         cover_id = save_upload(db, cover, g.now) if cover else (None if remove_cover else old_cover_id)
-        values = (title, summary, start_at, end_at, round_seconds, cover_id)
+        values = (title, summary, mode, start_at, end_at, round_seconds, cover_id)
         if contest:
             db.execute(
-                "UPDATE contests SET title = ?, summary = ?, start_at = ?, end_at = ?, round_seconds = ?, cover_id = ? WHERE id = ?",
+                "UPDATE contests SET title = ?, summary = ?, mode = ?, start_at = ?, end_at = ?, round_seconds = ?, cover_id = ? WHERE id = ?",
                 (*values, contest_id),
             )
         else:
             contest_id = db.execute(
-                "INSERT INTO contests (title, summary, start_at, end_at, round_seconds, cover_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                """INSERT INTO contests (title, summary, mode, start_at, end_at, round_seconds, cover_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (*values, g.now),
             ).lastrowid
         if old_cover_id is not None and cover_id != old_cover_id:
             db.execute("DELETE FROM uploads WHERE id = ?", (old_cover_id,))
     session["manage_contest_id"] = contest_id
+    if not contest:
+        return saved("比赛已创建，可以开始筹备赛题。", "manage.challenges", kind=mode)
     return saved("比赛配置已保存。", "manage.contests")
 
 
@@ -134,9 +147,12 @@ def deactivate_contest(contest_id):
 @manage.post("/contests/<int:contest_id>/select")
 @admin_required
 def select_contest(contest_id):
-    if not get_db().execute("SELECT 1 FROM contests WHERE id = ?", (contest_id,)).fetchone():
+    contest = get_db().execute("SELECT mode FROM contests WHERE id = ?", (contest_id,)).fetchone()
+    if not contest:
         abort(404)
     session["manage_contest_id"] = contest_id
+    if request.form.get("section") == "challenges":
+        return redirect(url_for("manage.challenges", kind=contest["mode"]), code=303)
     return saved("已切换编辑的比赛。", "manage.overview")
 
 
@@ -217,9 +233,11 @@ def teams():
                FROM users u LEFT JOIN memberships m ON m.user_id = u.id AND m.contest_id = ?
                LEFT JOIN teams t ON t.id = m.team_id WHERE u.role = 'player' ORDER BY u.display_name, u.id""", (contest_id,),
         ).fetchall()
-        matrix = service_matrix(db, contest_id, public=False)
-        events = score_records(db, contest_id, limit=20)
-    return render_template("manage/teams.html", title="队伍与服务", rows=rows, players=players, matrix=matrix, events=events)
+        if g.managed["mode"] == "round":
+            matrix = service_matrix(db, contest_id, public=False)
+            events = score_records(db, contest_id, limit=20)
+    title = "队伍与服务" if matrix is not None else "队伍管理"
+    return render_template("manage/teams.html", title=title, rows=rows, players=players, matrix=matrix, events=events)
 
 
 @manage.route("/teams/new", defaults={"team_id": None}, methods=["GET", "POST"])
@@ -265,20 +283,14 @@ def membership():
     return saved("参赛账号的队伍已更新。", "manage.teams")
 
 
-def challenge_table(kind):
-    if kind == "puzzle":
-        return "puzzles"
-    if kind == "round":
-        return "round_tasks"
-    abort(404)
-
-
 @manage.get("/challenges/<kind>")
 @admin_required
 def challenges(kind):
-    table = challenge_table(kind)
+    table = CHALLENGE_TABLES.get(kind)
+    if not table:
+        abort(404)
     rows = get_db().execute(
-        f"SELECT * FROM {table} WHERE contest_id = ? ORDER BY published DESC, id", (g.managed["id"],),
+        f"SELECT * FROM {table} WHERE contest_id = ? ORDER BY published DESC, id", (managed_id(kind),),
     ).fetchall() if g.managed else []
     return render_template("manage/challenges.html", title="题目管理", rows=rows, kind=kind)
 
@@ -287,8 +299,10 @@ def challenges(kind):
 @manage.route("/challenges/<kind>/<int:task_id>/edit", methods=["GET", "POST"])
 @admin_required
 def challenge_edit(kind, task_id):
-    contest_id = managed_id()
-    table = challenge_table(kind)
+    table = CHALLENGE_TABLES.get(kind)
+    if not table:
+        abort(404)
+    contest_id = managed_id(kind)
     task = scoped_record(table, task_id, contest_id) if task_id is not None else None
     db = get_db()
     if request.method == "GET":
@@ -310,6 +324,7 @@ def challenge_edit(kind, task_id):
         uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
         remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
         with transaction(db, write=True):
+            managed_id(kind)
             if task:
                 if salt_and_digest:
                     db.execute("UPDATE puzzles SET flag_salt = ?, flag_digest = ? WHERE id = ?", (*salt_and_digest, task_id))
@@ -330,16 +345,18 @@ def challenge_edit(kind, task_id):
                 db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
     else:
         baseline = text_field("baseline", "基线版本", 80)
-        if task:
-            db.execute(
-                "UPDATE round_tasks SET title = ?, baseline = ?, description = ?, published = ? WHERE id = ? AND contest_id = ?",
-                (title, baseline, description, published, task_id, contest_id),
-            )
-        else:
-            db.execute(
-                "INSERT INTO round_tasks (contest_id, title, baseline, description, published) VALUES (?, ?, ?, ?, ?)",
-                (contest_id, title, baseline, description, published),
-            )
+        with transaction(db, write=True):
+            managed_id(kind)
+            if task:
+                db.execute(
+                    "UPDATE round_tasks SET title = ?, baseline = ?, description = ?, published = ? WHERE id = ? AND contest_id = ?",
+                    (title, baseline, description, published, task_id, contest_id),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO round_tasks (contest_id, title, baseline, description, published) VALUES (?, ?, ?, ?, ?)",
+                    (contest_id, title, baseline, description, published),
+                )
     return saved("赛题已保存。", "manage.challenges", kind=kind)
 
 
@@ -352,6 +369,7 @@ def update_status():
     status = choice_field("status", "服务状态", SERVICE_STATES)
     db = get_db()
     with transaction(db, write=True):
+        managed_id("round")
         scoped_record("teams", team_id, contest_id)
         scoped_record("round_tasks", task_id, contest_id)
         db.execute(
@@ -372,6 +390,7 @@ def record_score():
     reason = text_field("reason", "计分说明", 500)
     db = get_db()
     with transaction(db, write=True):
+        managed_id("round")
         contest = db.execute("SELECT * FROM contests WHERE id = ?", (contest_id,)).fetchone()
         state = contest_state(contest, g.now)
         if state["round"] < 1:
@@ -388,9 +407,7 @@ def record_score():
 @manage.get("/submissions")
 @admin_required
 def submissions():
-    kind = request.args.get("kind", "flag")
-    if kind not in {"flag", "patch"}:
-        abort(404)
+    kind = records_kind(g.managed)
     page = page_number()
     records = []
     if g.managed:
@@ -403,7 +420,7 @@ def submissions():
 @manage.route("/patches/<int:patch_id>", methods=["GET", "POST"])
 @admin_required
 def patch_review(patch_id):
-    contest_id = managed_id()
+    contest_id = managed_id("round")
     db = get_db()
     patch = db.execute(
         """SELECT p.*, t.name AS team_name, r.title, f.name AS file_name FROM patches p
@@ -418,6 +435,7 @@ def patch_review(patch_id):
     notes = text_field("review_notes", "评测说明", 2000, optional=True)
     award = integer_field("award", "加固积分", 0, 100_000) if status == "passed" else 0
     with transaction(db, write=True):
+        managed_id("round")
         current = scoped_record("patches", patch_id, contest_id)
         delta = award - current["award"]
         db.execute(

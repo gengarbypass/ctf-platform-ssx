@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash
 
 from .db import close_db, get_db, initialize
 from .domain import (
-    FLAG_VERDICTS, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError,
+    CONTEST_MODES, FLAG_VERDICTS, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError,
     contest_schedule, contest_state, countdown, local_time, round_segments,
 )
 
@@ -104,6 +104,7 @@ def create_app(overrides=None):
             "contest_state": contest_state,
             "round_segments": round_segments,
             "countdown": countdown,
+            "contest_modes": CONTEST_MODES,
             "patch_states": PATCH_STATES,
             "service_states": SERVICE_STATES,
             "flag_verdicts": FLAG_VERDICTS,

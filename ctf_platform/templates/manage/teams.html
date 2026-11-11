@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("队伍与服务", g.managed.title if g.managed else "创建比赛后即可管理队伍。") %}
+  {% call ui.heading(title, g.managed.title if g.managed else "创建比赛后即可管理队伍。") %}
     {% if g.managed %}{{ ui.link("创建队伍", url_for('manage.team_edit'), "primary", "plus") }}{% else %}{{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}{% endif %}
   {% endcall %}
   {% if g.managed %}
@@ -25,6 +25,8 @@
       </table></div>
       {% else %}<div class="arena-detail-copy"><p>还没有参赛账号。</p>{{ ui.link("创建账号",url_for('manage.account_edit'),"link","next") }}</div>{% endif %}
     {% endcall %}
+  {% endif %}
+  {% if matrix is not none %}
     {% call ui.panel("服务状态") %}{{ ui.service_table(matrix) }}{% endcall %}
     {% set match = contest_state(g.managed,g.now) %}
     <div class="arena-two">

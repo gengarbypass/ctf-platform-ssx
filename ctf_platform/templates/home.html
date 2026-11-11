@@ -1,34 +1,28 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {{ ui.hero(g.contest, g.match) }}
-  <section>
-    <div class="arena-section-head"><h2>比赛模式</h2></div>
-    <div class="arena-two arena-mode-grid">
-      <a class="arena-panel arena-mode-card" href="{{ url_for('site.puzzles') }}">
-        <div class="arena-mode-head"><span class="arena-icon-box">{{ ui.icon("flag") }}</span><div><h3>解题模式</h3><p>按类别浏览赛题，提交 Flag 累计积分。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
-        <div class="arena-mode-metrics"><span><strong>{{ metrics.puzzles|default(0) }}</strong> 道赛题</span>{% if metrics.puzzle %}<span>已解 <strong>{{ metrics.puzzle.solved }}</strong> 道</span>{% endif %}</div>
+  {{ ui.hero(g.contest, g.match, empty_title='解题赛' if entry_mode else '等待比赛开启') }}
+  {% if not entry_mode or g.contest %}
+    <nav class="arena-two arena-mode-grid" aria-label="{{ '比赛导航' if g.contest else '比赛入口' }}">
+      <a class="arena-panel arena-mode-card" href="{{ url_for('site.puzzles' if g.contest else 'site.puzzle_home') }}">
+        <div class="arena-mode-head"><span class="arena-icon-box">{{ ui.icon("flag") }}</span><div><h2>{{ "题库" if g.contest else "解题赛" }}</h2><p>按分类查看赛题，提交 Flag。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
+        {% if g.contest and metrics.puzzles is defined %}
+        <div class="arena-mode-metrics"><span><strong>{{ metrics.puzzles }}</strong> 道赛题</span>{% if metrics.puzzle %}<span>已解 <strong>{{ metrics.puzzle.solved }}</strong> 道</span>{% endif %}</div>
+        {% endif %}
       </a>
+      {% if g.contest %}
+      <a class="arena-panel arena-mode-card" href="{{ url_for('site.ranking') }}">
+        <div class="arena-mode-head"><span class="arena-icon-box alt">{{ ui.icon("ranking") }}</span><div><h2>排行榜</h2><p>查看队伍积分与排名。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
+        {% if metrics.puzzle %}<div class="arena-mode-metrics"><span>本队 <strong>{{ '{:,}'.format(metrics.puzzle.points) }}</strong> 分</span></div>{% endif %}
+      </a>
+      {% else %}
       <a class="arena-panel arena-mode-card" href="{{ url_for('site.awdp') }}">
-        <div class="arena-mode-head"><span class="arena-icon-box alt">{{ ui.icon("shield") }}</span><div><h3>AWDP 模式</h3><p>提交补丁，跟踪服务状态与回合得分。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
-        <div class="arena-mode-metrics"><span><strong>{{ metrics.tasks|default(0) }}</strong> 道赛题</span>{% if g.match and g.match.round %}<span>第 <strong>{{ g.match.round }} / {{ g.match.rounds }}</strong> 回合</span>{% endif %}</div>
+        <div class="arena-mode-head"><span class="arena-icon-box alt">{{ ui.icon("shield") }}</span><div><h2>AWDP</h2><p>提交补丁，查看服务状态与回合得分。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
       </a>
-    </div>
-  </section>
-  {% if g.contest %}
-    <div class="arena-two arena-split">
-      {% call ui.panel("比赛安排") %}
-        <div class="arena-detail-copy"><p>{{ contest_schedule(g.contest) }} · {{ timezone }}</p>
-        <p>{% if g.team %}参赛队伍 {{ g.team.name }}{% else %}请联系赛事人员为当前账号分配队伍。{% endif %}</p></div>
-      {% endcall %}
-      {% call ui.panel(g.team.name ~ " 战绩" if g.team else "队伍排行") %}
-        {% if g.team %}
-          <div class="arena-home-score">
-            <div><span>解题积分</span><strong>{{ '{:,}'.format(metrics.puzzle.points if metrics.puzzle else 0) }}</strong></div>
-            <div><span>AWDP 总分</span><strong>{{ '{:,}'.format(metrics.round.points if metrics.round else 0) }}</strong></div>
-          </div>
-        {% else %}<div class="arena-detail-copy">{{ ui.link("查看排行榜", url_for('site.ranking'), "link", "next") }}</div>{% endif %}
-      {% endcall %}
-    </div>
+      {% endif %}
+    </nav>
+  {% endif %}
+  {% if g.contest and not g.team and g.user.role == 'player' %}
+    <p class="arena-muted">请联系赛事人员为当前账号分配队伍。</p>
   {% endif %}
 {% endblock %}

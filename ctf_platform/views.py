@@ -7,7 +7,7 @@ from werkzeug.security import check_password_hash
 
 from .db import get_db, transaction
 from .domain import (
-    CATEGORIES, FormError, contest_schedule, contest_state, flag_digest, login_required,
+    CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, contest_schedule, contest_state, flag_digest, login_required,
     local_time, round_segments, text_field,
 )
 from .queries import flag_records, patch_records, puzzle_rankings, round_rankings, round_trend, score_records, service_matrix
@@ -22,16 +22,46 @@ def page_number():
     return min(max(request.args.get("page", 1, type=int), 1), 1_000_000)
 
 
-def first_page():
-    return url_for("manage.overview" if g.user["role"] == "admin" else "site.home")
+def entry_url(mode):
+    return url_for("site.puzzle_home" if mode == "puzzle" else "site.awdp")
+
+
+def first_page(mode=None):
+    if g.user["role"] == "admin":
+        return url_for("manage.overview")
+    mode = mode or (g.contest["mode"] if g.contest else None)
+    return entry_url(mode) if mode else url_for("site.home")
+
+
+def scope_entry(mode):
+    if mode and g.contest and g.contest["mode"] != mode:
+        g.contest = g.match = g.team = None
+
+
+def login_mode():
+    mode = request.args.get("mode")
+    if mode is not None and mode not in CONTEST_MODES:
+        abort(404)
+    scope_entry(mode)
+    return mode
+
+
+def records_kind(contest):
+    expected = "patch" if contest and contest["mode"] == "round" else "flag"
+    kind = request.args.get("kind", expected)
+    if kind not in {"flag", "patch"} or (contest and kind != expected):
+        abort(404)
+    return kind
 
 
 @site.route("/login", methods=["GET", "POST"])
 def login():
+    mode = login_mode()
     if g.user:
-        return redirect(first_page())
+        return redirect(first_page(mode))
+    presentation = {"title": f"{CONTEST_MODES[mode]} · 登录" if mode else "登录比赛平台", "entry_mode": mode}
     if request.method == "GET":
-        return render_template("login.html", title="登录比赛平台")
+        return render_template("login.html", **presentation)
     username = request.form.get("username", "").strip().lower()
     password = request.form.get("password", "")
     principal = hashlib.sha256(f"{request.remote_addr}\0{username[:40]}".encode()).hexdigest()
@@ -41,7 +71,7 @@ def login():
         "SELECT COUNT(*) FROM login_failures WHERE principal = ? AND occurred_at >= ?", (principal, threshold),
     ).fetchone()[0]
     if attempts >= 8:
-        return render_template("login.html", title="登录比赛平台", error="尝试次数过多，请在 10 分钟后重试。", username=username[:40]), 429
+        return render_template("login.html", **presentation, error="尝试次数过多，请在 10 分钟后重试。", username=username[:40]), 429
     user = db.execute("SELECT * FROM users WHERE username = ? AND enabled = 1", (username,)).fetchone() if len(username) <= 40 else None
     digest = user["password_hash"] if user else current_app.config["DUMMY_PASSWORD_HASH"]
     valid = len(password) <= 128 and check_password_hash(digest, password)
@@ -49,13 +79,13 @@ def login():
         with transaction(db, write=True):
             db.execute("DELETE FROM login_failures WHERE occurred_at < ?", (threshold,))
             db.execute("INSERT INTO login_failures VALUES (?, ?)", (principal, g.now))
-        return render_template("login.html", title="登录比赛平台", error="账号或密码错误，请重试。", username=username[:40]), 401
+        return render_template("login.html", **presentation, error="账号或密码错误，请重试。", username=username[:40]), 401
     db.execute("DELETE FROM login_failures WHERE principal = ?", (principal,))
     session.clear()
     session.update(user_id=user["id"], auth_version=user["auth_version"])
     session.permanent = True
     g.user = user
-    return redirect(first_page())
+    return redirect(first_page(mode))
 
 
 @site.post("/logout")
@@ -67,6 +97,7 @@ def logout():
 
 @site.get("/api/login-presentation")
 def login_presentation():
+    login_mode()
     contest = g.contest
     return jsonify(
         title=contest["title"] if contest else g.brand["name"],
@@ -80,25 +111,34 @@ def login_presentation():
 @site.get("/")
 @login_required
 def home():
-    if g.user["role"] == "admin":
-        return redirect(url_for("manage.overview"))
+    if g.user["role"] == "admin" or g.contest:
+        return redirect(first_page())
+    return render_template("home.html", title="比赛首页", entry_mode=None)
+
+
+@site.get("/puzzle")
+def puzzle_home():
+    if not g.user:
+        return redirect(url_for("site.login", mode="puzzle"))
+    scope_entry("puzzle")
     metrics = {}
     if g.contest:
         db = get_db()
         contest_id = g.contest["id"]
-        metrics = {
-            "puzzles": db.execute("SELECT COUNT(*) FROM puzzles WHERE contest_id = ? AND published = 1", (contest_id,)).fetchone()[0],
-            "tasks": db.execute("SELECT COUNT(*) FROM round_tasks WHERE contest_id = ? AND published = 1", (contest_id,)).fetchone()[0],
-        }
+        if g.match["status"] != "upcoming":
+            metrics["puzzles"] = db.execute(
+                "SELECT COUNT(*) FROM puzzles WHERE contest_id = ? AND published = 1", (contest_id,),
+            ).fetchone()[0]
         if g.team:
             metrics["puzzle"] = next((row for row in puzzle_rankings(db, contest_id) if row["id"] == g.team["id"]), None)
-            metrics["round"] = next((row for row in round_rankings(db, contest_id) if row["id"] == g.team["id"]), None)
-    return render_template("home.html", title="比赛首页", metrics=metrics)
+    return render_template("home.html", title="比赛首页", entry_mode="puzzle", metrics=metrics)
 
 
 @site.get("/challenges")
 @login_required
 def puzzles():
+    if g.contest and g.contest["mode"] != "puzzle":
+        abort(404)
     category = request.args.get("category", "")
     if category and category not in CATEGORIES:
         abort(404)
@@ -113,12 +153,13 @@ def puzzles():
                GROUP BY p.id ORDER BY p.category, p.points, p.id""",
             (g.team["id"] if g.team else None, g.contest["id"], category, category),
         ).fetchall()
-    return render_template("puzzles.html", title="解题模式", cards=cards, categories=CATEGORIES, category=category)
+    return render_template("puzzles.html", title="解题题库", cards=cards, categories=CATEGORIES, category=category)
 
 
-def readable_task(table, task_id):
-    if not g.contest or g.match["status"] == "upcoming":
+def readable_task(mode, task_id):
+    if not g.contest or g.contest["mode"] != mode or g.match["status"] == "upcoming":
         abort(404)
+    table = CHALLENGE_TABLES[mode]
     task = get_db().execute(
         f"SELECT * FROM {table} WHERE id = ? AND contest_id = ? AND published = 1",
         (task_id, g.contest["id"]),
@@ -131,7 +172,7 @@ def readable_task(table, task_id):
 @site.get("/challenges/<int:puzzle_id>")
 @login_required
 def puzzle(puzzle_id):
-    challenge = readable_task("puzzles", puzzle_id)
+    challenge = readable_task("puzzle", puzzle_id)
     db = get_db()
     files = db.execute(
         """SELECT f.id, f.name, length(f.content) AS size FROM puzzle_files a JOIN uploads f ON f.id = a.file_id
@@ -149,11 +190,13 @@ def puzzle(puzzle_id):
     return render_template("puzzle.html", title=challenge["title"], puzzle=challenge, files=files, solves=solves, solved=solved, history=history, notice=notice)
 
 
-def submission_context(db, table, task_id):
+def submission_context(db, mode, task_id):
     now = int(time.time())
     contest = db.execute("SELECT * FROM contests WHERE active = 1").fetchone()
     if not contest or contest_state(contest, now)["status"] != "live":
         abort(403, "当前不在比赛提交时间内。")
+    if contest["mode"] != mode:
+        abort(404)
     team = db.execute(
         """SELECT t.* FROM memberships m JOIN teams t ON t.id = m.team_id JOIN users u ON u.id = m.user_id
            WHERE m.contest_id = ? AND u.id = ? AND u.enabled = 1 AND u.role = 'player' AND u.auth_version = ?""",
@@ -161,6 +204,7 @@ def submission_context(db, table, task_id):
     ).fetchone()
     if team is None:
         abort(403, "请先加入当前比赛的队伍。")
+    table = CHALLENGE_TABLES[mode]
     task = db.execute(
         f"SELECT * FROM {table} WHERE id = ? AND contest_id = ? AND published = 1",
         (task_id, contest["id"]),
@@ -176,7 +220,7 @@ def submit_flag(puzzle_id):
     value = text_field("flag", "Flag", 256)
     db = get_db()
     with transaction(db, write=True):
-        contest, team, challenge, now = submission_context(db, "puzzles", puzzle_id)
+        contest, team, challenge, now = submission_context(db, "puzzle", puzzle_id)
         attempts = db.execute(
             "SELECT COUNT(*) FROM flag_submissions WHERE contest_id = ? AND team_id = ? AND submitted_at >= ?",
             (contest["id"], team["id"], now - 60),
@@ -203,8 +247,10 @@ def submit_flag(puzzle_id):
 
 
 @site.get("/awdp")
-@login_required
 def awdp():
+    if not g.user:
+        return redirect(url_for("site.login", mode="round"))
+    scope_entry("round")
     view = request.args.get("view", "live")
     if view not in {"live", "tasks", "teams", "patches"}:
         abort(404)
@@ -213,28 +259,30 @@ def awdp():
         db = get_db()
         contest_id = g.contest["id"]
         team_id = g.team["id"] if g.team else None
-        state = service_matrix(db, contest_id)
+        state = service_matrix(db, contest_id) if g.match["status"] != "upcoming" else None
         data = {
             "matrix": state,
-            "tasks": state["tasks"] if g.match["status"] != "upcoming" else [],
+            "tasks": state["tasks"] if state else [],
             "events": score_records(db, contest_id, team_id=team_id, limit=10),
             "trend": round_trend(db, contest_id, team_id, g.match["round"]),
             "patches": patch_records(db, contest_id, team_id=team_id, limit=10) if team_id else [],
             "standings": round_rankings(db, contest_id),
         }
-    return render_template("awdp.html", title="AWDP 模式", view=view, data=data)
+    return render_template("awdp.html", title="比赛首页" if view == "live" else "AWDP", view=view, data=data)
 
 
 @site.get("/awdp/challenges/<int:task_id>")
 @login_required
 def round_task(task_id):
-    task = readable_task("round_tasks", task_id)
+    task = readable_task("round", task_id)
     return render_template("round_task.html", title=task["title"], task=task, max_upload=current_app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024))
 
 
 @site.post("/awdp/challenges/<int:task_id>/patch")
 @login_required
 def submit_patch(task_id):
+    if g.contest and g.contest["mode"] != "round":
+        abort(404)
     if not g.team or not g.match or g.match["status"] != "live":
         abort(403)
     version = text_field("version", "补丁版本", 40)
@@ -242,7 +290,7 @@ def submit_patch(task_id):
     upload = read_upload(request.files.get("patch"), "patch", required=True)
     db = get_db()
     with transaction(db, write=True):
-        contest, team, task, now = submission_context(db, "round_tasks", task_id)
+        contest, team, task, now = submission_context(db, "round", task_id)
         file_id = save_upload(db, upload, now)
         patch_id = db.execute(
             """INSERT INTO patches (contest_id, team_id, task_id, user_id, file_id, version, notes, submitted_at)
@@ -256,8 +304,9 @@ def submit_patch(task_id):
 @site.get("/rankings")
 @login_required
 def ranking():
-    kind = request.args.get("kind", "puzzle")
-    if kind not in {"puzzle", "round"}:
+    expected = g.contest["mode"] if g.contest else "puzzle"
+    kind = request.args.get("kind", expected)
+    if kind not in CONTEST_MODES or (g.contest and kind != expected):
         abort(404)
     standings = []
     if g.contest:
@@ -269,9 +318,7 @@ def ranking():
 @site.get("/submissions")
 @login_required
 def records():
-    kind = request.args.get("kind", "flag")
-    if kind not in {"flag", "patch"}:
-        abort(404)
+    kind = records_kind(g.contest)
     page = page_number()
     rows = []
     if g.team and g.contest:
@@ -297,7 +344,8 @@ def download(file_id):
     db = get_db()
     admin = g.user["role"] == "admin"
     contest_id = g.contest["id"] if g.contest else None
-    may_read = g.match and g.match["status"] != "upcoming"
+    puzzle_open = bool(g.contest and g.contest["mode"] == "puzzle" and g.match["status"] != "upcoming")
+    patch_team = g.team["id"] if g.team and g.contest["mode"] == "round" else None
     row = db.execute(
         """SELECT f.* FROM uploads f WHERE f.id = ? AND (
              (f.kind = 'attachment' AND EXISTS (
@@ -307,7 +355,7 @@ def download(file_id):
                SELECT 1 FROM patches p WHERE p.file_id = f.id AND (? = 1 OR (p.contest_id = ? AND p.team_id = ?))
              ))
            )""",
-        (file_id, admin, contest_id, bool(may_read), admin, contest_id, g.team["id"] if g.team else None),
+        (file_id, admin, contest_id, puzzle_open, admin, contest_id, patch_team),
     ).fetchone()
     if not row:
         abort(404)
@@ -315,11 +363,11 @@ def download(file_id):
 
 
 def board_snapshot(kind):
-    if kind not in {"puzzle", "round"}:
+    if kind not in CONTEST_MODES:
         abort(404)
     now = int(time.time())
     with transaction(get_db()) as db:
-        contest = db.execute("SELECT * FROM contests WHERE active = 1").fetchone()
+        contest = db.execute("SELECT * FROM contests WHERE active = 1 AND mode = ?", (kind,)).fetchone()
         data = {"teams": [], "events": [], "matrix": None}
         if contest:
             contest_id = contest["id"]
@@ -327,7 +375,8 @@ def board_snapshot(kind):
                 data.update(teams=puzzle_rankings(db, contest_id), events=flag_records(db, contest_id, accepted=True, limit=5))
             else:
                 match = contest_state(contest, now)
-                data.update(teams=round_rankings(db, contest_id), matrix=service_matrix(db, contest_id),
+                matrix = service_matrix(db, contest_id) if match["status"] != "upcoming" else None
+                data.update(teams=round_rankings(db, contest_id), matrix=matrix,
                             events=score_records(db, contest_id, round_no=match["round"], limit=5))
     state = contest_state(contest, now)
     clock_label, clock_end = "赛事未开启", now
@@ -361,13 +410,13 @@ def board_snapshot(kind):
 def scoreboard(kind):
     board, timing = board_snapshot(kind)
     back = request.args.get("from")
-    destination = url_for("site.ranking", kind=kind)
-    if back == "challenges" and kind == "puzzle":
+    destination = url_for("site.ranking", kind=kind) if timing["id"] else entry_url(kind)
+    if back == "manage" and g.user["role"] == "admin":
+        destination = url_for("manage.overview")
+    elif back == "challenges" and kind == "puzzle" and timing["id"]:
         destination = url_for("site.puzzles")
     elif back == "awdp" and kind == "round":
         destination = url_for("site.awdp")
-    elif back == "manage" and g.user["role"] == "admin":
-        destination = url_for("manage.overview")
     return render_template("scoreboard.html", title="计分板大屏", kind=kind, board=board, timing=timing,
                            destination=destination, poll_seconds=current_app.config["BOARD_POLL_SECONDS"])
 
