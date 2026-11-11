@@ -45,9 +45,9 @@ def service_matrix(db, contest_id, *, public=True):
 
 def flag_records(db, contest_id, *, team_id=None, puzzle_id=None, accepted=False, limit=50, offset=0):
     return db.execute(
-        """SELECT f.*, p.title, p.category, t.name AS team_name, u.display_name
+        """SELECT f.*, p.title, p.category, t.name AS team_name, COALESCE(u.display_name, '已删除账号') AS display_name
            FROM flag_submissions f JOIN puzzles p ON p.id = f.puzzle_id
-           JOIN teams t ON t.id = f.team_id JOIN users u ON u.id = f.user_id
+           JOIN teams t ON t.id = f.team_id LEFT JOIN users u ON u.id = f.user_id
            WHERE f.contest_id = ? AND (? IS NULL OR f.team_id = ?) AND (? IS NULL OR f.puzzle_id = ?)
            AND (? = 0 OR f.verdict = 'correct') ORDER BY f.id DESC LIMIT ? OFFSET ?""",
         (contest_id, team_id, team_id, puzzle_id, puzzle_id, accepted, limit, offset),
@@ -56,9 +56,9 @@ def flag_records(db, contest_id, *, team_id=None, puzzle_id=None, accepted=False
 
 def patch_records(db, contest_id, *, team_id=None, limit=50, offset=0):
     return db.execute(
-        """SELECT p.*, r.title, t.name AS team_name, u.display_name, f.name AS file_name
+        """SELECT p.*, r.title, t.name AS team_name, COALESCE(u.display_name, '已删除账号') AS display_name, f.name AS file_name
            FROM patches p JOIN round_tasks r ON r.id = p.task_id JOIN teams t ON t.id = p.team_id
-           JOIN users u ON u.id = p.user_id JOIN uploads f ON f.id = p.file_id
+           LEFT JOIN users u ON u.id = p.user_id JOIN uploads f ON f.id = p.file_id
            WHERE p.contest_id = ? AND (? IS NULL OR p.team_id = ?) ORDER BY p.id DESC LIMIT ? OFFSET ?""",
         (contest_id, team_id, team_id, limit, offset),
     ).fetchall()
@@ -66,8 +66,8 @@ def patch_records(db, contest_id, *, team_id=None, limit=50, offset=0):
 
 def score_records(db, contest_id, *, team_id=None, round_no=None, limit=50, offset=0):
     return db.execute(
-        """SELECT s.*, t.name AS team_name, u.display_name AS actor
-           FROM score_events s JOIN teams t ON t.id = s.team_id JOIN users u ON u.id = s.actor_id
+        """SELECT s.*, t.name AS team_name, COALESCE(u.display_name, '已删除账号') AS actor
+           FROM score_events s JOIN teams t ON t.id = s.team_id LEFT JOIN users u ON u.id = s.actor_id
            WHERE s.contest_id = ? AND (? IS NULL OR s.team_id = ?) AND (? IS NULL OR s.round_no = ?)
            ORDER BY s.id DESC LIMIT ? OFFSET ?""",
         (contest_id, team_id, team_id, round_no, round_no, limit, offset),

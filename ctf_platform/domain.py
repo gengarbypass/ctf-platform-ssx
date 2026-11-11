@@ -103,14 +103,18 @@ def contest_state(contest, now):
         return None
     start = contest["start_at"]
     end = contest["end_at"]
-    seconds = contest["round_seconds"]
-    rounds = (end - start + seconds - 1) // seconds
     if now < start:
-        return {"status": "upcoming", "label": "待开赛", "round": 0, "rounds": rounds, "round_end": start}
-    if now >= end:
-        return {"status": "finished", "label": "比赛已结束", "round": rounds, "rounds": rounds, "round_end": end}
-    round_no = (now - start) // seconds + 1
-    return {"status": "live", "label": "比赛进行中", "round": round_no, "rounds": rounds, "round_end": min(end, start + round_no * seconds)}
+        state = {"status": "upcoming", "label": "待开赛"}
+    elif now >= end:
+        state = {"status": "finished", "label": "比赛已结束"}
+    else:
+        state = {"status": "live", "label": "比赛进行中"}
+    if contest["mode"] == "round":
+        seconds = contest["round_seconds"]
+        rounds = (end - start + seconds - 1) // seconds
+        round_no = max(0, min(rounds, (now - start) // seconds + 1))
+        state.update(round=round_no, rounds=rounds, round_end=min(end, start + round_no * seconds))
+    return state
 
 
 def flag_digest(salt, value):
@@ -151,7 +155,7 @@ def countdown(seconds, show_hours=False):
 
 
 def round_segments(state):
-    if not state:
+    if not state or "rounds" not in state:
         return []
     visible = min(state["rounds"], 24)
     if state["round"] == 0:

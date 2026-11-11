@@ -7,7 +7,7 @@
   {% call ui.panel("比赛列表") %}
     {% if rows %}
       <div class="arena-table-wrap"><table class="arena-table"><caption>比赛列表</caption>
-        <thead><tr><th scope="col">比赛</th><th scope="col">类型</th><th scope="col">赛程</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <thead><tr><th scope="col">比赛</th><th scope="col">模式</th><th scope="col">赛程</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
         <tbody>{% for row in rows %}<tr>
           <td><strong>{{ row.title }}</strong>{% if row.summary %}<br><small class="arena-muted">{{ row.summary }}</small>{% endif %}</td>
           <td>{{ contest_modes[row.mode] }}</td>
@@ -21,6 +21,7 @@
             {% else %}
             <form action="{{ url_for('manage.activate_contest', contest_id=row.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn primary" type="submit">开启比赛</button></form>
             {% endif %}
+            {{ ui.link("删除", url_for('manage.contest_delete', contest_id=row.id), "link") }}
           </div></td>
         </tr>{% endfor %}</tbody>
       </table></div>

@@ -150,7 +150,10 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(sum("本题已解出" in result for result in results), 1)
         awards = self.lookup("SELECT verdict, points FROM flag_submissions WHERE team_id = ? ORDER BY id", (team_id,))
         self.assertEqual([tuple(row) for row in awards], [("incorrect", 0), ("correct", 200), ("already_solved", 0)])
-        ranking = player.get("/api/scoreboard/puzzle").json["content"]
+        scoreboard = player.get("/api/scoreboard/puzzle").json
+        self.assertEqual(scoreboard["timing"]["round_label"], "")
+        self.assertEqual(scoreboard["timing"]["segments"], [])
+        ranking = scoreboard["content"]
         self.assertIn('data-sb-value="200"', ranking)
         self.assertIn("已解 1 题", ranking)
         self.assertNotIn("flag{fixture}", ranking)
@@ -271,6 +274,7 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(response.location, "/awdp")
 
     def test_upgrade_legacy_contests_preserves_challenges(self):
+        puzzle_only = self.contest("仅解题", active=False)
         mixed = self.contest(active=False)
         self.puzzle(mixed)
         rounds = self.contest("蓝域杯 · 回合赛", mode="round")
@@ -280,20 +284,131 @@ class PlatformTest(unittest.TestCase):
                 "INSERT INTO round_tasks (contest_id, title, baseline, description) VALUES (?, ?, ?, ?)",
                 (mixed, "旧回合赛题", "v1.0", "存档说明"),
             )
-            db.execute("ALTER TABLE contests DROP COLUMN mode")
-            db.execute("PRAGMA user_version = 1")
+            db.execute("UPDATE contests SET round_seconds = 1800 WHERE id = ?", (mixed,))
+            db.execute("PRAGMA foreign_keys = OFF")
+            db.executescript(
+                """BEGIN IMMEDIATE;
+                   CREATE TABLE contests_v1 (
+                       id INTEGER PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL,
+                       start_at INTEGER NOT NULL, end_at INTEGER NOT NULL CHECK (end_at > start_at),
+                       round_seconds INTEGER NOT NULL CHECK (round_seconds > 0), cover_id INTEGER REFERENCES uploads(id),
+                       active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)), created_at INTEGER NOT NULL
+                   );
+                   INSERT INTO contests_v1
+                       SELECT id, title, summary, start_at, end_at, COALESCE(round_seconds, 900), cover_id, active, created_at
+                       FROM contests;
+                   DROP TABLE contests;
+                   ALTER TABLE contests_v1 RENAME TO contests;
+                   CREATE UNIQUE INDEX one_active_contest ON contests(active) WHERE active = 1;
+                   PRAGMA user_version = 1;
+                   COMMIT;"""
+            )
 
         upgraded = create_app({**self.settings, "ADMIN_PASSWORD": ""})
         admin = self.login("arenaops", upgraded)
-        self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active FROM contests ORDER BY id")],
-                         [(mixed, "puzzle", 0), (rounds, "round", 1)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 2)
+        self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
+                         [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 3)
+        self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(len(self.lookup("SELECT id FROM round_tasks")), 2)
         contest = self.lookup("SELECT * FROM contests WHERE id = ?", (mixed,))[0]
         timezone = upgraded.config["TIME_ZONE"]
-        self.post(admin, f"/manage/contests/{mixed}/edit", title=contest["title"], mode="round", round_minutes=15,
+        self.post(admin, f"/manage/contests/{mixed}/edit", title=contest["title"], mode="round", round_minutes=30,
                   start_at=datetime.fromtimestamp(contest["start_at"], timezone).strftime("%Y-%m-%dT%H:%M"),
                   end_at=datetime.fromtimestamp(contest["end_at"], timezone).strftime("%Y-%m-%dT%H:%M"))
         self.assertIn("旧回合赛题", admin.get("/manage/challenges/round").get_data(as_text=True))
         self.assertEqual(self.lookup("SELECT id FROM contests WHERE active = 1")[0][0], rounds)
+
+    def test_contest_mode_controls_round_duration(self):
+        form = self.admin.get("/manage/contests/new").get_data(as_text=True)
+        self.assertIn('<option value="" selected>请选择比赛模式</option>', form)
+        self.assertIn("<div data-round-duration hidden>", form)
+        self.assertRegex(form, r'name="round_minutes"[^>]+\bdisabled\b')
+        now = datetime.now(self.app.config["TIME_ZONE"])
+        data = {"title": "模式检查", "start_at": now.strftime("%Y-%m-%dT%H:%M"),
+                "end_at": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")}
+        self.post(self.admin, "/manage/contests/new", code=400, **data)
+        self.post(self.admin, "/manage/contests/new", code=400, mode="round", **data)
+        self.post(self.admin, "/manage/contests/new", mode="puzzle", round_minutes="30", **data)
+        self.assertIsNone(self.lookup("SELECT round_seconds FROM contests")[0][0])
+
+    def test_delete_contest_removes_contents_and_uploads_in_its_scope(self):
+        contest_id = self.contest(cover=True)
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        puzzle_id = self.puzzle(contest_id)
+        self.post(player, f"/challenges/{puzzle_id}/flag", flag="flag{fixture}")
+        cover_id = self.lookup("SELECT cover_id FROM contests")[0][0]
+        file_id = self.lookup("SELECT file_id FROM puzzle_files")[0][0]
+        other_id = self.contest("筹备赛", active=False, cover=True)
+        self.puzzle(other_id)
+        route = f"/manage/contests/{contest_id}/delete"
+
+        self.assertIn("当前比赛会立即下线", self.admin.get(route).get_data(as_text=True))
+        self.assertEqual(self.lookup("SELECT active FROM contests WHERE id = ?", (contest_id,))[0][0], 1)
+        self.post(player, route, code=403)
+        self.assertEqual(self.admin.post(route).status_code, 400)
+        self.post(self.admin, route)
+        self.assertEqual(self.admin.get(route).status_code, 404)
+        self.assertEqual([row["id"] for row in self.lookup("SELECT id FROM contests")], [other_id])
+        self.assertEqual([row["contest_id"] for row in self.lookup("SELECT contest_id FROM puzzles")], [other_id])
+        self.assertEqual(self.lookup("SELECT * FROM teams WHERE id = ?", (team_id,)), [])
+        self.assertEqual(self.lookup("SELECT * FROM memberships"), [])
+        self.assertEqual(self.lookup("SELECT * FROM flag_submissions"), [])
+        self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id IN (?, ?)", (cover_id, file_id)), [])
+        self.assertEqual(len(self.lookup("SELECT id FROM uploads")), 2)
+        self.assertEqual(len(self.lookup("SELECT id FROM users")), 2)
+        self.assertIsNone(player.get("/api/scoreboard/puzzle").json["timing"]["id"])
+        self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
+
+    def test_delete_team_cleans_up_patches_and_points(self):
+        contest_id = self.contest(mode="round")
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        other, other_id = self.player(contest_id, "packetlab", "PacketLab")
+        task_id = self.round_task(contest_id)
+        for client in (player, other):
+            self.post(client, f"/awdp/challenges/{task_id}/patch", version="v1.1", patch=(patch_zip(), "sample.zip"))
+        patch = self.lookup("SELECT id, file_id FROM patches WHERE team_id = ?", (team_id,))[0]
+        self.post(self.admin, f"/manage/patches/{patch['id']}", contest_id=contest_id, status="passed", award=120)
+        self.post(self.admin, "/manage/services/status", contest_id=contest_id, team_id=team_id, task_id=task_id, status="healthy")
+        route = f"/manage/teams/{team_id}/delete"
+        self.assertIn("解除成员分队", self.admin.get(route).get_data(as_text=True))
+        self.post(self.admin, route, contest_id=contest_id + 1, code=400)
+        self.post(self.admin, route, contest_id=contest_id)
+
+        self.assertEqual([row["id"] for row in self.lookup("SELECT id FROM teams")], [other_id])
+        self.assertEqual([row["team_id"] for row in self.lookup("SELECT team_id FROM memberships")], [other_id])
+        self.assertEqual([row["team_id"] for row in self.lookup("SELECT team_id FROM patches")], [other_id])
+        self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id = ?", (patch["file_id"],)), [])
+        self.assertEqual(self.lookup("SELECT * FROM service_states"), [])
+        self.assertEqual(self.lookup("SELECT * FROM score_events"), [])
+        self.assertEqual(player.get("/awdp").status_code, 200)
+        self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
+
+    def test_delete_account_preserves_team_history_and_invalidates_session(self):
+        contest_id = self.contest()
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        puzzle_id = self.puzzle(contest_id)
+        self.post(player, f"/challenges/{puzzle_id}/flag", flag="flag{fixture}")
+        user_id = self.lookup("SELECT id FROM users WHERE username = 'bluefox'")[0][0]
+        route = f"/manage/accounts/{user_id}/delete"
+        self.assertIn("解除所有分队", self.admin.get(route).get_data(as_text=True))
+        self.post(self.admin, route)
+        self.assertEqual(self.lookup("SELECT id FROM users WHERE id = ?", (user_id,)), [])
+        self.assertEqual(self.lookup("SELECT * FROM memberships"), [])
+        self.assertEqual(tuple(self.lookup("SELECT team_id, user_id, points FROM flag_submissions")[0]), (team_id, None, 200))
+        self.assertIn("已删除账号", self.admin.get("/manage/submissions").get_data(as_text=True))
+        self.assertIn('data-sb-value="200"', self.admin.get("/api/scoreboard/puzzle").json["content"])
+        self.post(self.admin, "/manage/accounts/new", username="bluefox", display_name="New Fox",
+                  password=self.password, role="player", enabled="1")
+        self.assertGreater(self.lookup("SELECT id FROM users WHERE username = 'bluefox'")[0][0], user_id)
+        self.assertEqual(player.get("/puzzle").location, "/login?mode=puzzle")
+
+        admin_id = self.lookup("SELECT id FROM users WHERE role = 'admin'")[0][0]
+        admin_route = f"/manage/accounts/{admin_id}/delete"
+        self.post(self.admin, admin_route, code=400)
+        self.post(self.admin, "/manage/accounts/new", username="newops", display_name="New Ops",
+                  password=self.password, role="admin", enabled="1")
+        self.assertEqual(self.post(self.admin, admin_route).location, "/login")
+        self.assertEqual([row["username"] for row in self.lookup("SELECT username FROM users WHERE role = 'admin'")], ["newops"])
+        self.assertEqual(self.admin.get("/manage/").location, "/login")

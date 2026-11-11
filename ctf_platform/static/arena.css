@@ -99,6 +99,8 @@
   #lanyu-arena .arena-btn:hover { border-color: var(--arena-blue); color: var(--arena-blue-ink); }
   #lanyu-arena .arena-btn.primary { background: var(--arena-blue); color: white; border-color: transparent; }
   #lanyu-arena .arena-btn.primary:hover { background: var(--arena-blue-ink); }
+  #lanyu-arena .arena-btn.danger { background: #b42318; color: white; border-color: transparent; }
+  #lanyu-arena .arena-btn.danger:hover { background: #912018; }
   #lanyu-arena .arena-btn .arena-icon, #lanyu-arena .arena-link .arena-icon { width: 15px; height: 15px; }
   #lanyu-arena .arena-link { display: inline-flex; align-items: center; gap: 4px; color: var(--arena-blue-ink); background: transparent; border: 0; padding: 2px 0; font-size: 12px; font-weight: 670; white-space: nowrap; }
   #lanyu-arena .arena-link:hover { text-decoration: underline; text-underline-offset: 3px; }

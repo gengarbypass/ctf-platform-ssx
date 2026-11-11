@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {{ ui.heading(title, subject) }}
+  {% call ui.panel("删除后无法恢复") %}
+    <form class="arena-form arena-form-narrow" method="post">
+      {{ ui.csrf(scoped|default(false)) }}
+      <p>{{ impact }}</p>
+      <div class="arena-actions">
+        {{ ui.link("取消", back) }}
+        <button class="arena-btn danger" type="submit">确认删除</button>
+      </div>
+    </form>
+  {% endcall %}
+{% endblock %}

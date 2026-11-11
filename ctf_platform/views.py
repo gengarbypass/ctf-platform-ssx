@@ -368,18 +368,21 @@ def board_snapshot(kind):
     now = int(time.time())
     with transaction(get_db()) as db:
         contest = db.execute("SELECT * FROM contests WHERE active = 1 AND mode = ?", (kind,)).fetchone()
+        state = contest_state(contest, now)
         data = {"teams": [], "events": [], "matrix": None}
         if contest:
             contest_id = contest["id"]
             if kind == "puzzle":
                 data.update(teams=puzzle_rankings(db, contest_id), events=flag_records(db, contest_id, accepted=True, limit=5))
             else:
-                match = contest_state(contest, now)
-                matrix = service_matrix(db, contest_id) if match["status"] != "upcoming" else None
+                matrix = service_matrix(db, contest_id) if state["status"] != "upcoming" else None
                 data.update(teams=round_rankings(db, contest_id), matrix=matrix,
-                            events=score_records(db, contest_id, round_no=match["round"], limit=5))
-    state = contest_state(contest, now)
+                            events=score_records(db, contest_id, round_no=state["round"], limit=5))
     clock_label, clock_end = "赛事未开启", now
+    round_label = ""
+    if state and kind == "round":
+        current_round, rounds = state["round"], state["rounds"]
+        round_label = f"第 {current_round:02d} / {rounds} 回合" if current_round else f"共 {rounds} 回合"
     if contest:
         if state["status"] == "upcoming":
             clock_label, clock_end = "距开赛", contest["start_at"]
@@ -397,7 +400,7 @@ def board_snapshot(kind):
         "clock_label": clock_label,
         "clock_end": clock_end,
         "now": now,
-        "round_label": f"第 {state['round']:02d} / {state['rounds']} 回合" if state and state["round"] else (f"共 {state['rounds']} 回合" if state else ""),
+        "round_label": round_label,
         "segments": round_segments(state),
         "start_label": local_time(contest["start_at"], "%H:%M") if contest else "",
         "end_label": local_time(contest["end_at"], "%H:%M") if contest else "",

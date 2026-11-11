@@ -24,21 +24,22 @@ CREATE TABLE IF NOT EXISTS site_settings (
 );
 
 CREATE TABLE IF NOT EXISTS contests (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     summary TEXT NOT NULL,
     mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round')),
     start_at INTEGER NOT NULL,
     end_at INTEGER NOT NULL CHECK (end_at > start_at),
-    round_seconds INTEGER NOT NULL CHECK (round_seconds > 0),
+    round_seconds INTEGER CHECK (round_seconds > 0),
     cover_id INTEGER REFERENCES uploads(id),
     active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    CHECK (mode != 'round' OR round_seconds IS NOT NULL)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_contest ON contests(active) WHERE active = 1;
 
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
@@ -55,8 +56,8 @@ CREATE TABLE IF NOT EXISTS login_failures (
 CREATE INDEX IF NOT EXISTS login_failures_recent ON login_failures(principal, occurred_at);
 
 CREATE TABLE IF NOT EXISTS teams (
-    id INTEGER PRIMARY KEY,
-    contest_id INTEGER NOT NULL REFERENCES contests(id),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
     name TEXT NOT NULL COLLATE NOCASE,
     UNIQUE (contest_id, name),
     UNIQUE (contest_id, id)
@@ -64,15 +65,15 @@ CREATE TABLE IF NOT EXISTS teams (
 
 CREATE TABLE IF NOT EXISTS memberships (
     contest_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL REFERENCES users(id),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     team_id INTEGER NOT NULL,
     PRIMARY KEY (contest_id, user_id),
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id)
+    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS puzzles (
-    id INTEGER PRIMARY KEY,
-    contest_id INTEGER NOT NULL REFERENCES contests(id),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     category TEXT NOT NULL,
     difficulty TEXT NOT NULL,
@@ -86,22 +87,22 @@ CREATE TABLE IF NOT EXISTS puzzles (
 CREATE INDEX IF NOT EXISTS puzzle_listing ON puzzles(contest_id, published, category);
 
 CREATE TABLE IF NOT EXISTS puzzle_files (
-    puzzle_id INTEGER NOT NULL REFERENCES puzzles(id),
+    puzzle_id INTEGER NOT NULL REFERENCES puzzles(id) ON DELETE CASCADE,
     file_id INTEGER NOT NULL UNIQUE REFERENCES uploads(id),
     PRIMARY KEY (puzzle_id, file_id)
 );
 
 CREATE TABLE IF NOT EXISTS flag_submissions (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     contest_id INTEGER NOT NULL,
     puzzle_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL REFERENCES users(id),
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     verdict TEXT NOT NULL CHECK (verdict IN ('correct', 'incorrect', 'already_solved')),
     points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
     submitted_at INTEGER NOT NULL,
-    FOREIGN KEY (contest_id, puzzle_id) REFERENCES puzzles(contest_id, id),
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id)
+    FOREIGN KEY (contest_id, puzzle_id) REFERENCES puzzles(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_flag_award ON flag_submissions(puzzle_id, team_id) WHERE verdict = 'correct';
 CREATE INDEX IF NOT EXISTS flags_team ON flag_submissions(contest_id, team_id, id DESC);
@@ -109,8 +110,8 @@ CREATE INDEX IF NOT EXISTS flags_team_recent ON flag_submissions(contest_id, tea
 CREATE INDEX IF NOT EXISTS flags_contest ON flag_submissions(contest_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS round_tasks (
-    id INTEGER PRIMARY KEY,
-    contest_id INTEGER NOT NULL REFERENCES contests(id),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     baseline TEXT NOT NULL,
     description TEXT NOT NULL,
@@ -125,19 +126,19 @@ CREATE TABLE IF NOT EXISTS service_states (
     task_id INTEGER NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('unknown', 'healthy', 'unhealthy', 'maintenance')),
     updated_at INTEGER NOT NULL,
-    updated_by INTEGER NOT NULL REFERENCES users(id),
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     PRIMARY KEY (team_id, task_id),
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id),
-    FOREIGN KEY (contest_id, task_id) REFERENCES round_tasks(contest_id, id)
+    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (contest_id, task_id) REFERENCES round_tasks(contest_id, id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS states_contest ON service_states(contest_id);
 
 CREATE TABLE IF NOT EXISTS patches (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     contest_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
     task_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL REFERENCES users(id),
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     file_id INTEGER NOT NULL UNIQUE REFERENCES uploads(id),
     version TEXT NOT NULL,
     notes TEXT NOT NULL DEFAULT '',
@@ -146,16 +147,16 @@ CREATE TABLE IF NOT EXISTS patches (
     award INTEGER NOT NULL DEFAULT 0 CHECK (award >= 0),
     submitted_at INTEGER NOT NULL,
     reviewed_at INTEGER,
-    reviewed_by INTEGER REFERENCES users(id),
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id),
-    FOREIGN KEY (contest_id, task_id) REFERENCES round_tasks(contest_id, id),
+    reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (contest_id, task_id) REFERENCES round_tasks(contest_id, id) ON DELETE CASCADE,
     UNIQUE (contest_id, id)
 );
 CREATE INDEX IF NOT EXISTS patches_contest ON patches(contest_id, id DESC);
 CREATE INDEX IF NOT EXISTS patches_team ON patches(contest_id, team_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS score_events (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     contest_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('attack', 'defense', 'uptime')),
@@ -164,9 +165,26 @@ CREATE TABLE IF NOT EXISTS score_events (
     reason TEXT NOT NULL,
     patch_id INTEGER,
     occurred_at INTEGER NOT NULL,
-    actor_id INTEGER NOT NULL REFERENCES users(id),
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id),
-    FOREIGN KEY (contest_id, patch_id) REFERENCES patches(contest_id, id)
+    actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (contest_id, patch_id) REFERENCES patches(contest_id, id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS scores_contest ON score_events(contest_id, id DESC);
 CREATE INDEX IF NOT EXISTS scores_team ON score_events(contest_id, team_id, round_no);
+
+CREATE TRIGGER IF NOT EXISTS remove_contest_cover AFTER DELETE ON contests
+WHEN OLD.cover_id IS NOT NULL
+BEGIN
+    DELETE FROM uploads WHERE id = OLD.cover_id AND kind = 'cover'
+      AND NOT EXISTS (SELECT 1 FROM contests WHERE cover_id = OLD.cover_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS remove_puzzle_attachment AFTER DELETE ON puzzle_files
+BEGIN
+    DELETE FROM uploads WHERE id = OLD.file_id AND kind = 'attachment';
+END;
+
+CREATE TRIGGER IF NOT EXISTS remove_patch_upload AFTER DELETE ON patches
+BEGIN
+    DELETE FROM uploads WHERE id = OLD.file_id AND kind = 'patch';
+END;

@@ -49,11 +49,11 @@
   <p class="arena-empty">{{ text }}</p>
 {%- endmacro %}
 
-{% macro field(label, name, value='', type='text', max=100, required=true, placeholder='', min='', maximum='') -%}
+{% macro field(label, name, value='', type='text', max=100, required=true, placeholder='', min='', maximum='', disabled=false) -%}
   <label class="arena-field">{{ label }}
     <input class="arena-input" name="{{ name }}" type="{{ type }}" value="{{ value if value is not none else '' }}"
       {% if type in ['text','password'] %}maxlength="{{ max }}"{% endif %}{% if min != '' %} min="{{ min }}"{% endif %}{% if maximum != '' %} max="{{ maximum }}"{% endif %}
-      {% if required %} required{% endif %}{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}{% if type == 'password' %} autocomplete="new-password"{% endif %}>
+      {% if required %} required{% endif %}{% if disabled %} disabled{% endif %}{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}{% if type == 'password' %} autocomplete="new-password"{% endif %}>
   </label>
 {%- endmacro %}
 
