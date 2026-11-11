@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {{ ui.heading(title, g.managed.title if admin and g.managed else g.team.name if g.team else '') }}
+  {% set endpoint = 'manage.submissions' if admin else 'site.records' %}
+  <nav class="arena-tabs" aria-label="提交类型">
+    <a href="{{ url_for(endpoint, kind='flag') }}"{% if kind == 'flag' %} aria-current="page"{% endif %}>Flag 记录</a>
+    <a href="{{ url_for(endpoint, kind='patch') }}"{% if kind == 'patch' %} aria-current="page"{% endif %}>补丁记录</a>
+  </nav>
+  {% call ui.panel("Flag 提交" if kind == 'flag' else "补丁提交") %}
+    {% if kind == 'flag' %}{{ ui.flag_table(rows, admin) }}{% else %}{{ ui.patch_table(rows, admin) }}{% endif %}
+  {% endcall %}
+  {% if page > 1 or more %}
+  <nav class="arena-actions" aria-label="记录分页">
+    {% if page > 1 %}{{ ui.link("上一页", url_for(endpoint, kind=kind, page=page-1), "", "back") }}{% endif %}
+    <span class="arena-muted">第 {{ page }} 页</span>
+    {% if more %}{{ ui.link("下一页", url_for(endpoint, kind=kind, page=page+1), "", "next") }}{% endif %}
+  </nav>
+  {% endif %}
+{% endblock %}

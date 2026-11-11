@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block shell %}
+<div class="arena-entry" data-login-presentation="{{ url_for('site.login_presentation') }}">
+  <header class="arena-entry-header">{{ ui.mark(g.brand) }}<span data-brand-name>{{ g.brand.name }}</span></header>
+  <main class="arena-entry-main">
+    <div class="arena-entry-card">
+      {{ ui.hero(g.contest, g.match, true) }}
+      <form class="arena-entry-form" action="{{ url_for('site.login') }}" method="post">
+        {{ ui.csrf() }}
+        <header><h1>登录比赛平台</h1></header>
+        <label class="arena-field">账号<input class="arena-input" name="username" type="text" value="{{ username|default('') }}" placeholder="输入账号" autocomplete="username" spellcheck="false" maxlength="40" required></label>
+        <label class="arena-field">密码<input class="arena-input" name="password" type="password" placeholder="输入密码" autocomplete="current-password" maxlength="128" required></label>
+        {% if error %}<div class="arena-feedback error" role="alert">{{ error }}</div>{% endif %}
+        <button class="arena-btn primary" type="submit">登录</button>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %}

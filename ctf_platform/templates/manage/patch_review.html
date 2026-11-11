@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回补丁记录",url_for('manage.submissions',kind='patch'),"link","back") }}</div>
+  {% call ui.heading("补丁提交详情", patch.title ~ ' · ' ~ patch.team_name ~ ' · P-' ~ ('%04d'|format(patch.id))) %}{{ ui.patch_status(patch.status) }}{% endcall %}
+  <div class="arena-two">
+    {% call ui.panel("提交信息") %}
+      <div class="arena-detail-copy">
+        <dl class="arena-detail-data"><div><dt>版本</dt><dd>{{ patch.version }}</dd></div><div><dt>提交时间</dt><dd>{{ local_time(patch.submitted_at) }}</dd></div><div><dt>已计积分</dt><dd>{{ patch.award }}</dd></div></dl>
+        <p class="arena-pre">{{ patch.notes or '未填写加固说明。' }}</p>
+        <div class="arena-actions">{{ ui.link(patch.file_name, url_for('site.download',file_id=patch.file_id),"","down") }}</div>
+      </div>
+    {% endcall %}
+    {% call ui.panel("评测结果") %}
+      <form class="arena-form" method="post">
+        {{ ui.csrf(true) }}
+        {{ ui.select("评测状态","status",patch_states.items(),patch.status) }}
+        {{ ui.field("通过后获得的加固积分","award",patch.award,type='number',min=0,maximum=100000) }}
+        {{ ui.description("评测说明","review_notes",patch.review_notes,rows=4) }}
+        <div class="arena-actions"><button class="arena-btn primary" type="submit">保存评测</button></div>
+      </form>
+    {% endcall %}
+  </div>
+{% endblock %}

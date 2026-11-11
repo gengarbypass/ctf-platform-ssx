@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("AWDP 模式", "查看比赛进程、队伍服务和补丁评测。") %}
+    {% if g.match %}{{ ui.pill(g.match.label, "success" if g.match.status == 'live' else "neutral") }}{% endif %}
+    {{ ui.link("计分板大屏", url_for('site.scoreboard', kind='round', **{'from':'awdp'}), "primary", "screen") }}
+  {% endcall %}
+  <nav class="arena-tabs" aria-label="赛场导航">
+    {% for key, label in [('live','赛场总览'),('tasks','攻防赛题'),('teams','队伍状态'),('patches','加固记录')] %}
+      <a href="{{ url_for('site.awdp', view=key) }}"{% if view == key %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% if not g.contest %}
+    {% call ui.panel("") %}{{ ui.empty("当前没有开启的比赛。") }}{% endcall %}
+  {% elif view == 'teams' %}
+    {% call ui.panel("队伍与服务状态") %}{{ ui.service_table(data.matrix) }}{% endcall %}
+  {% elif view == 'patches' %}
+    {% call ui.panel("本队加固记录") %}{{ ui.patch_table(data.patches) }}{% endcall %}
+    {{ ui.link("查看完整记录", url_for('site.records', kind='patch'), "link", "next") }}
+  {% else %}
+    {% if view == 'live' %}
+      <section class="arena-panel arena-round">
+        <div class="arena-round-head"><div><h2>比赛进程</h2><p>{% if g.match.round %}第 <strong>{{ g.match.round }}</strong> / {{ g.match.rounds }} 回合{% else %}共 {{ g.match.rounds }} 回合{% endif %}</p></div>
+          <div class="arena-round-time"><time data-clock-end="{{ g.match.round_end }}" data-server-now="{{ g.now }}">{{ countdown(g.match.round_end - g.now) }}</time><small>{{ "本回合剩余" if g.match.status == 'live' else "距开赛" if g.match.status == 'upcoming' else "比赛已结束" }}</small></div>
+        </div>
+        {% set segments = round_segments(g.match) %}
+        <div class="arena-round-bars" style="grid-template-columns:repeat({{ segments|length }},1fr)" aria-hidden="true">
+          {% for segment in segments %}<span class="{{ 'complete' if segment == 'is-complete' else 'current' if segment == 'is-current' else '' }}"></span>{% endfor %}
+        </div>
+        <div class="arena-round-labels"><span>{{ local_time(g.contest.start_at, '%m-%d %H:%M') }} 开赛</span><span>{{ local_time(g.contest.end_at, '%m-%d %H:%M') }} 结束</span></div>
+      </section>
+      {% if g.team %}
+        {% set own = data.standings|selectattr('id','eq',g.team.id)|first|default(none) %}
+        <div class="arena-kpis">
+          <div class="arena-panel arena-kpi"><span>本队总分</span><strong>{{ '{:,}'.format(own.points if own else 0) }}</strong></div>
+          <div class="arena-panel arena-kpi"><span>当前排名</span><strong>{% for team in data.standings %}{% if team.id == g.team.id %}第 {{ loop.index }} 名{% endif %}{% endfor %}</strong></div>
+          <div class="arena-panel arena-kpi"><span>服务正常</span><strong>{% set count = namespace(value=0) %}{% for task in data.matrix.tasks %}{% if data.matrix.states.get((g.team.id,task.id)) == 'healthy' %}{% set count.value = count.value + 1 %}{% endif %}{% endfor %}{{ count.value }} / {{ data.matrix.tasks|length }}</strong></div>
+        </div>
+      {% endif %}
+      {% if data.trend %}
+        {% call ui.panel("本队回合积分走势") %}
+          {% set maximum = [1, data.trend|map(attribute='total')|map('abs')|max]|max %}
+          <div class="arena-trend" aria-label="最近回合累计积分">{% for point in data.trend %}
+            <div class="arena-trend-point"><strong>{{ point.total }}</strong><div class="arena-trend-track"><i style="height:{{ ((point.total|abs / maximum) * 100)|round }}%"></i></div><small>R{{ point.round }}</small></div>
+          {% endfor %}</div>
+        {% endcall %}
+      {% endif %}
+      {% call ui.panel("得分变化") %}{{ ui.score_table(data.events, not g.team) }}{% endcall %}
+    {% endif %}
+    {% call ui.panel("攻防赛题") %}
+      {% if data.tasks %}
+        <div class="arena-table-wrap"><table class="arena-table"><caption>已发布赛题</caption>
+          <thead><tr><th scope="col">赛题 / 服务</th><th scope="col">基线版本</th>{% if g.team %}<th scope="col">本队状态</th>{% endif %}<th scope="col">操作</th></tr></thead>
+          <tbody>{% for task in data.tasks %}<tr>
+            <td><strong>{{ task.title }}</strong></td><td class="arena-mono">{{ task.baseline }}</td>
+            {% if g.team %}<td>{{ ui.service_status(data.matrix.states.get((g.team.id,task.id),'unknown')) }}</td>{% endif %}
+            <td>{{ ui.link("查看赛题", url_for('site.round_task', task_id=task.id), "link", "next") }}</td>
+          </tr>{% endfor %}</tbody>
+        </table></div>
+      {% else %}{{ ui.empty("暂无开放的赛题。") }}{% endif %}
+    {% endcall %}
+  {% endif %}
+{% endblock %}

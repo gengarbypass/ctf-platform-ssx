@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回赛题", url_for('site.awdp', view='tasks'), "link", "back") }}</div>
+  {{ ui.heading(task.title, "基线版本 " ~ task.baseline) }}
+  <div class="arena-two arena-split">
+    {% call ui.panel("赛题说明") %}<div class="arena-detail-copy"><p class="arena-pre">{{ task.description }}</p></div>{% endcall %}
+    {% call ui.panel("提交补丁") %}
+      {% if g.team and g.match.status == 'live' %}
+      <form class="arena-form" action="{{ url_for('site.submit_patch', task_id=task.id) }}" method="post" enctype="multipart/form-data">
+        {{ ui.csrf() }}
+        {{ ui.field("补丁版本", "version", max=40, placeholder="例如 v1.2.1") }}
+        <label class="arena-field">补丁包<input class="arena-input" name="patch" type="file" accept=".zip,application/zip" required><small>ZIP 文件，上传请求上限 {{ max_upload }} MiB。</small></label>
+        {{ ui.description("加固说明","notes",rows=3) }}
+        <div class="arena-actions"><button class="arena-btn primary" type="submit">提交评测</button></div>
+      </form>
+      {% else %}<div class="arena-detail-copy"><p>{{ "当前不在比赛提交时间内。" if g.match.status != 'live' else "加入当前比赛的队伍后即可提交。" }}</p></div>{% endif %}
+    {% endcall %}
+  </div>
+{% endblock %}

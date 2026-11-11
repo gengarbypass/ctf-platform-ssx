@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("解题模式", "选择赛题，提交 Flag 后查看判定与积分。") %}
+    {{ ui.link("我的提交", url_for('site.records'), "", "history") }}
+    {{ ui.link("计分板大屏", url_for('site.scoreboard', kind='puzzle', **{'from':'challenges'}), "primary", "screen") }}
+  {% endcall %}
+  <nav class="arena-tabs" aria-label="赛题分类">
+    {% for value in ('',) + categories %}
+      <a href="{{ url_for('site.puzzles', category=value) }}"{% if value == category %} aria-current="page"{% endif %}>{{ value or '全部' }}</a>
+    {% endfor %}
+  </nav>
+  {% if cards %}
+    <div class="arena-grid">
+      {% for card in cards %}
+      <a class="arena-panel arena-task" href="{{ url_for('site.puzzle', puzzle_id=card.id) }}">
+        <div class="arena-task-top"><span class="arena-icon-box">{{ ui.icon('flag') }}</span>{{ ui.pill("已解" if card.solved else "未解", "success" if card.solved else "neutral") }}</div>
+        <div><h2>{{ card.title }}</h2><p>{{ card.category }} · {{ card.difficulty }}{% if card.attached %} · 有附件{% endif %}</p></div>
+        <div class="arena-task-bottom"><span><strong class="arena-number">{{ card.points }}</strong> <small>分</small></span><small>{{ card.solves }} 队解出</small></div>
+      </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    {% call ui.panel("") %}{{ ui.empty("赛题将在开赛后开放。" if g.match and g.match.status == 'upcoming' else "当前分类暂无可查看的赛题。") }}{% endcall %}
+  {% endif %}
+{% endblock %}

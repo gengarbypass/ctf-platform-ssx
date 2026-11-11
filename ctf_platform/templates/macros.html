@@ -1,0 +1,143 @@
+{% macro csrf(scoped=false) -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if scoped and g.managed %}<input type="hidden" name="contest_id" value="{{ g.managed.id }}">{% endif %}
+{%- endmacro %}
+
+{% macro icon(name) -%}
+  <span class="arena-icon" aria-hidden="true">{{ {'home':'⊞','flag':'⚑','shield':'◇','ranking':'♜','history':'◷','teams':'♧','brand':'◉','list':'☷','calendar':'▦','file':'▤','up':'↑','down':'↓','next':'→','back':'←','screen':'⛶','logout':'⇥','code':'‹›','plus':'+'}.get(name, '·') }}</span>
+{%- endmacro %}
+
+{% macro mark(brand) -%}
+  <span class="arena-mark">{% if brand.logo_id %}<img src="{{ url_for('site.image', file_id=brand.logo_id) }}" alt="">{% else %}{{ icon(brand.icon) }}{% endif %}</span>
+{%- endmacro %}
+
+{% macro link(label, href, variant='', glyph='') -%}
+  <a class="{{ 'arena-link' if variant == 'link' else 'arena-btn ' ~ variant }}" href="{{ href }}">{% if glyph and glyph != 'next' %}{{ icon(glyph) }}{% endif %}{{ label }}{% if glyph == 'next' %}{{ icon(glyph) }}{% endif %}</a>
+{%- endmacro %}
+
+{% macro pill(label, tone='') -%}
+  <span class="arena-pill {{ tone }}">{{ label }}</span>
+{%- endmacro %}
+
+{% macro verdict(value) -%}
+  {{ pill(flag_verdicts[value], {'correct':'success','incorrect':'error','already_solved':'neutral'}[value]) }}
+{%- endmacro %}
+
+{% macro patch_status(value) -%}
+  {{ pill(patch_states[value], {'passed':'success','rejected':'error','pending':'warning','testing':''}[value]) }}
+{%- endmacro %}
+
+{% macro service_status(value) -%}
+  {{ pill(service_states[value], {'healthy':'success','unhealthy':'error','maintenance':'warning','unknown':'neutral'}[value]) }}
+{%- endmacro %}
+
+{% macro heading(title, summary='') -%}
+  <header class="arena-page-head">
+    <div><h1>{{ title }}</h1>{% if summary %}<p>{{ summary }}</p>{% endif %}</div>
+    {% if caller is defined %}<div class="arena-head-action"><div class="arena-actions">{{ caller() }}</div></div>{% endif %}
+  </header>
+{%- endmacro %}
+
+{% macro panel(title) -%}
+  <section class="arena-panel">
+    {% if title %}<header class="arena-panel-head"><h2>{{ title }}</h2></header>{% endif %}
+    {{ caller() }}
+  </section>
+{%- endmacro %}
+
+{% macro empty(text) -%}
+  <p class="arena-empty">{{ text }}</p>
+{%- endmacro %}
+
+{% macro field(label, name, value='', type='text', max=100, required=true, placeholder='', min='', maximum='') -%}
+  <label class="arena-field">{{ label }}
+    <input class="arena-input" name="{{ name }}" type="{{ type }}" value="{{ value if value is not none else '' }}"
+      {% if type in ['text','password'] %}maxlength="{{ max }}"{% endif %}{% if min != '' %} min="{{ min }}"{% endif %}{% if maximum != '' %} max="{{ maximum }}"{% endif %}
+      {% if required %} required{% endif %}{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}{% if type == 'password' %} autocomplete="new-password"{% endif %}>
+  </label>
+{%- endmacro %}
+
+{% macro description(label, name, value='', rows=4, max=2000, required=false) -%}
+  <label class="arena-field">{{ label }}<textarea class="arena-input" name="{{ name }}" rows="{{ rows }}" maxlength="{{ max }}"{% if required %} required{% endif %}>{{ value or '' }}</textarea></label>
+{%- endmacro %}
+
+{% macro select(label, name, options, selected='', required=true) -%}
+  <label class="arena-field">{{ label }}<select class="arena-input" name="{{ name }}"{% if required %} required{% endif %}>
+    {% for value, text in options %}<option value="{{ value }}"{% if value == selected %} selected{% endif %}>{{ text }}</option>{% endfor %}
+  </select></label>
+{%- endmacro %}
+
+{% macro hero(contest, match, login=false) -%}
+  <section class="arena-hero{% if login %} arena-entry-cover{% endif %}{% if contest and contest.cover_id %} has-image{% endif %}"{% if login %} data-login-cover{% endif %}>
+    <img class="arena-hero-image" alt=""{% if contest and contest.cover_id %} src="{{ url_for('site.image', file_id=contest.cover_id) }}"{% else %} hidden{% endif %}>
+    <div class="arena-hero-copy">
+      <span class="arena-pill hero-status" data-event-status>{{ match.label if match else '等待开赛' }}</span>
+      {% if login %}<h2 data-event-title>{{ contest.title if contest else g.brand.name }}</h2>
+      {% else %}<h1 class="arena-hero-title" data-event-title>{{ contest.title if contest else '等待比赛开启' }}</h1>{% endif %}
+      <p data-event-summary>{{ contest.summary if contest else '比赛开启后，赛程和赛题将在这里展示。' }}</p>
+      <div class="arena-hero-date" data-event-date{% if not contest %} hidden{% endif %}>{{ icon('calendar') }}<span data-event-schedule>{{ contest_schedule(contest) ~ ' · ' ~ timezone if contest else '' }}</span></div>
+    </div>
+    <div class="arena-art" aria-hidden="true"{% if contest and contest.cover_id %} hidden{% endif %}>
+      <i class="arena-art-orbit outer"></i><i class="arena-art-orbit"></i><div class="arena-art-shield"><span>{{ icon(g.brand.icon) }}</span></div><i class="arena-art-node"></i><i class="arena-art-node"></i>
+    </div>
+  </section>
+{%- endmacro %}
+
+{% macro service_table(matrix) -%}
+  {% if matrix and matrix.teams and matrix.tasks %}
+    <div class="arena-table-wrap"><table class="arena-table">
+      <caption>队伍服务状态</caption>
+      <thead><tr><th scope="col">队伍</th>{% for task in matrix.tasks %}<th scope="col">{{ task.title }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for team in matrix.teams %}
+        <tr{% if g.team and team.id == g.team.id %} class="arena-ours"{% endif %}>
+          <td><span class="arena-team">{{ team.name }}{% if g.team and team.id == g.team.id %}<small>本队</small>{% endif %}</span></td>
+          {% for task in matrix.tasks %}<td>{{ service_status(matrix.states.get((team.id,task.id),'unknown')) }}</td>{% endfor %}
+        </tr>
+      {% endfor %}</tbody>
+    </table></div>
+  {% else %}{{ empty("暂无服务状态。") }}{% endif %}
+{%- endmacro %}
+
+{% macro score_table(rows, show_team=false) -%}
+  {% if rows %}
+    <div class="arena-table-wrap"><table class="arena-table">
+      <caption>计分流水</caption><thead><tr><th scope="col">时间</th><th scope="col">回合</th>{% if show_team %}<th scope="col">队伍</th>{% endif %}<th scope="col">项目</th><th scope="col">变化</th><th scope="col">说明</th></tr></thead>
+      <tbody>{% for row in rows %}<tr>
+        <td class="arena-nowrap arena-mono">{{ local_time(row.occurred_at) }}</td><td>{{ row.round_no }}</td>
+        {% if show_team %}<td>{{ row.team_name }}</td>{% endif %}
+        <td>{{ score_kinds[row.kind] }}</td><td class="arena-mono {{ 'arena-positive' if row.delta > 0 else 'arena-negative' }}">{{ signed(row.delta) }}</td>
+        <td>{{ row.reason }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  {% else %}{{ empty("暂无得分变化。") }}{% endif %}
+{%- endmacro %}
+
+{% macro flag_table(rows, admin=false, show_title=true) -%}
+  {% if rows %}
+    <div class="arena-table-wrap"><table class="arena-table"><caption>Flag 提交记录</caption>
+      <thead><tr>{% if show_title %}<th scope="col">题目</th>{% endif %}{% if admin %}<th scope="col">队伍</th><th scope="col">提交人</th>{% endif %}<th scope="col">提交时间</th><th scope="col">判定</th><th scope="col">积分变化</th></tr></thead>
+      <tbody>{% for row in rows %}<tr>
+        {% if show_title %}<td><strong>{{ row.title }}</strong></td>{% endif %}
+        {% if admin %}<td>{{ row.team_name }}</td><td>{{ row.display_name }}</td>{% endif %}
+        <td class="arena-mono arena-nowrap">{{ local_time(row.submitted_at) }}</td><td>{{ verdict(row.verdict) }}</td>
+        <td class="arena-score arena-number">{{ signed(row.points) if row.points else '—' }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  {% else %}{{ empty("暂无 Flag 提交。") }}{% endif %}
+{%- endmacro %}
+
+{% macro patch_table(rows, admin=false) -%}
+  {% if rows %}
+    <div class="arena-table-wrap"><table class="arena-table"><caption>补丁提交记录</caption>
+      <thead><tr><th scope="col">赛题 / 提交号</th>{% if admin %}<th scope="col">队伍</th>{% endif %}<th scope="col">版本</th><th scope="col">提交时间</th><th scope="col">评测状态</th><th scope="col">加固积分</th><th scope="col">操作</th></tr></thead>
+      <tbody>{% for row in rows %}<tr>
+        <td><strong>{{ row.title }}</strong><br><small class="arena-mono arena-muted">P-{{ '%04d'|format(row.id) }}</small></td>
+        {% if admin %}<td>{{ row.team_name }}</td>{% endif %}
+        <td class="arena-mono">{{ row.version }}</td><td class="arena-mono arena-nowrap">{{ local_time(row.submitted_at) }}</td>
+        <td>{{ patch_status(row.status) }}{% if row.review_notes %}<br><small class="arena-muted">{{ row.review_notes }}</small>{% endif %}</td>
+        <td class="arena-score arena-number">{{ row.award }}</td>
+        <td>{% if admin %}{{ link("评测详情", url_for("manage.patch_review", patch_id=row.id), "link") }}{% else %}{{ link("下载补丁", url_for("site.download", file_id=row.file_id), "link", "down") }}{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  {% else %}{{ empty("暂无补丁提交。") }}{% endif %}
+{%- endmacro %}

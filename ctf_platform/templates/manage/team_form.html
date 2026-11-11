@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回队伍与服务",url_for('manage.teams'),"link","back") }}</div>
+  {{ ui.heading(title, g.managed.title) }}
+  {% call ui.panel("队伍信息") %}
+    <form class="arena-form arena-form-narrow" method="post">
+      {{ ui.csrf(true) }}{{ ui.field("队名","name",team.name if team else '',max=50) }}
+      <div class="arena-actions"><button class="arena-btn primary" type="submit">保存队伍</button>{{ ui.link("取消",url_for('manage.teams')) }}</div>
+    </form>
+  {% endcall %}
+{% endblock %}

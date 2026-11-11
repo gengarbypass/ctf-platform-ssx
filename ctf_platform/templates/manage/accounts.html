@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("账号管理", "账号权限决定登录后的页面。") %}{{ ui.link("创建账号", url_for('manage.account_edit'), "primary", "plus") }}{% endcall %}
+  {% call ui.panel("账号列表") %}
+    <div class="arena-table-wrap"><table class="arena-table"><caption>账号列表</caption>
+      <thead><tr><th scope="col">登录账号</th><th scope="col">显示名称</th><th scope="col">权限</th><th scope="col">队伍</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+      <tbody>{% for row in rows %}<tr>
+        <td class="arena-mono">{{ row.username }}</td><td><strong>{{ row.display_name }}</strong></td><td>{{ "赛事管理" if row.role == 'admin' else "参赛" }}</td>
+        <td>{{ row.team_name or '—' }}</td><td>{{ ui.pill("启用" if row.enabled else "停用","success" if row.enabled else "neutral") }}</td>
+        <td>{{ ui.link("编辑", url_for('manage.account_edit', user_id=row.id), "link") }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  {% endcall %}
+{% endblock %}

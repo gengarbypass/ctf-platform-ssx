@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {{ ui.hero(g.contest, g.match) }}
+  <section>
+    <div class="arena-section-head"><h2>比赛模式</h2></div>
+    <div class="arena-two arena-mode-grid">
+      <a class="arena-panel arena-mode-card" href="{{ url_for('site.puzzles') }}">
+        <div class="arena-mode-head"><span class="arena-icon-box">{{ ui.icon("flag") }}</span><div><h3>解题模式</h3><p>按类别浏览赛题，提交 Flag 累计积分。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
+        <div class="arena-mode-metrics"><span><strong>{{ metrics.puzzles|default(0) }}</strong> 道赛题</span>{% if metrics.puzzle %}<span>已解 <strong>{{ metrics.puzzle.solved }}</strong> 道</span>{% endif %}</div>
+      </a>
+      <a class="arena-panel arena-mode-card" href="{{ url_for('site.awdp') }}">
+        <div class="arena-mode-head"><span class="arena-icon-box alt">{{ ui.icon("shield") }}</span><div><h3>AWDP 模式</h3><p>提交补丁，跟踪服务状态与回合得分。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
+        <div class="arena-mode-metrics"><span><strong>{{ metrics.tasks|default(0) }}</strong> 道赛题</span>{% if g.match and g.match.round %}<span>第 <strong>{{ g.match.round }} / {{ g.match.rounds }}</strong> 回合</span>{% endif %}</div>
+      </a>
+    </div>
+  </section>
+  {% if g.contest %}
+    <div class="arena-two arena-split">
+      {% call ui.panel("比赛安排") %}
+        <div class="arena-detail-copy"><p>{{ contest_schedule(g.contest) }} · {{ timezone }}</p>
+        <p>{% if g.team %}参赛队伍 {{ g.team.name }}{% else %}请联系赛事人员为当前账号分配队伍。{% endif %}</p></div>
+      {% endcall %}
+      {% call ui.panel(g.team.name ~ " 战绩" if g.team else "队伍排行") %}
+        {% if g.team %}
+          <div class="arena-home-score">
+            <div><span>解题积分</span><strong>{{ '{:,}'.format(metrics.puzzle.points if metrics.puzzle else 0) }}</strong></div>
+            <div><span>AWDP 总分</span><strong>{{ '{:,}'.format(metrics.round.points if metrics.round else 0) }}</strong></div>
+          </div>
+        {% else %}<div class="arena-detail-copy">{{ ui.link("查看排行榜", url_for('site.ranking'), "link", "next") }}</div>{% endif %}
+      {% endcall %}
+    </div>
+  {% endif %}
+{% endblock %}

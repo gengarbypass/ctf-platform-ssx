@@ -1,0 +1,365 @@
+#lanyu-arena {
+    --arena-blue: #2458d8;
+    --arena-bg: #f2f5fb;
+    --arena-paper: #ffffff;
+    --arena-ink: #142342;
+    --arena-muted: #586982;
+    --arena-border: #dce5f1;
+    --arena-soft: color-mix(in srgb, var(--arena-blue) 8%, white);
+    --arena-blue-ink: color-mix(in srgb, var(--arena-blue) 84%, #091f50);
+    --arena-navy: #0b2457;
+    --arena-radius: 12px;
+    --arena-side-width: 178px;
+    --arena-main-pad: 24px;
+    --arena-mono: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
+    color-scheme: light;
+    color: var(--arena-ink);
+    font: 14px/1.55 Inter, "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+    text-align: left;
+    max-width: 100%;
+    width: 100%;
+    isolation: isolate;
+  }
+  #lanyu-arena *, #lanyu-arena *::before, #lanyu-arena *::after { box-sizing: border-box; }
+  #lanyu-arena [hidden] { display: none !important; }
+  #lanyu-arena h1, #lanyu-arena h2, #lanyu-arena h3, #lanyu-arena p { color: inherit; margin: 0; }
+  #lanyu-arena button, #lanyu-arena input, #lanyu-arena select, #lanyu-arena textarea { font: inherit; }
+  #lanyu-arena button { cursor: pointer; text-align: inherit; }
+  #lanyu-arena button:disabled { opacity: .58; cursor: default; }
+  #lanyu-arena :focus-visible { outline: 2px solid var(--arena-blue); outline-offset: 3px; }
+  #lanyu-arena code, #lanyu-arena .arena-mono { font: 12px/1.5 var(--arena-mono); font-variant-numeric: tabular-nums; }
+  #lanyu-arena .arena-number { font-variant-numeric: tabular-nums; }
+  #lanyu-arena .arena-muted { color: var(--arena-muted); }
+  #lanyu-arena .arena-icon { width: 18px; height: 18px; display: inline-grid; flex: 0 0 auto; place-items: center; vertical-align: middle; }
+  #lanyu-arena .arena-icon > svg { width: 100%; height: 100%; stroke-width: 1.8; }
+  #lanyu-arena .arena-icon > i:empty { display: none; }
+  #lanyu-arena .arena-icon > svg + .arena-icon-fallback { display: none; }
+  #lanyu-arena .arena-icon-fallback { line-height: 1; font: 18px/1 "Segoe UI Symbol", sans-serif; }
+  #lanyu-arena .arena-top { display: grid; grid-template-columns: var(--arena-side-width) minmax(0, 1fr); background: var(--arena-paper); border-bottom: 1px solid var(--arena-border); }
+  #lanyu-arena .arena-brand { display: flex; gap: 10px; align-items: center; height: 64px; padding: 0 17px; min-width: 0; color: var(--arena-ink); font-size: 16px; font-weight: 750; background: transparent; border: 0; border-right: 1px solid var(--arena-border); }
+  #lanyu-arena [data-brand-name] { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #lanyu-arena .arena-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; overflow: hidden; border-radius: 9px; color: white; background: linear-gradient(145deg, color-mix(in srgb, var(--arena-blue) 81%, #72a7ff), var(--arena-blue)); box-shadow: inset 0 1px 0 #ffffff40, 0 2px 5px #173d921a; }
+  #lanyu-arena .arena-mark .arena-icon { width: 19px; height: 19px; }
+  #lanyu-arena .arena-mark img { display: block; width: 100%; height: 100%; object-fit: contain; background: white; }
+  #lanyu-arena .arena-topbar { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 var(--arena-main-pad); }
+  #lanyu-arena .arena-crumb { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; color: var(--arena-muted); }
+  #lanyu-arena .arena-crumb strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--arena-ink); font-weight: 650; }
+  #lanyu-arena .arena-crumb .arena-icon { width: 13px; height: 13px; color: #8596b0; }
+  #lanyu-arena .arena-entry { background: var(--arena-bg); }
+  #lanyu-arena .arena-entry-header { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 0 var(--arena-main-pad); border-bottom: 1px solid var(--arena-border); background: var(--arena-paper); font-size: 16px; font-weight: 750; }
+  #lanyu-arena .arena-entry-main { display: grid; place-items: center; min-height: 606px; padding: 38px var(--arena-main-pad); }
+  #lanyu-arena .arena-entry-card { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); width: min(840px, 100%); min-height: 424px; overflow: hidden; border: 1px solid var(--arena-border); border-radius: calc(var(--arena-radius) + 5px); background: var(--arena-paper); box-shadow: 0 17px 49px #142f6710; }
+  #lanyu-arena .arena-entry-card .arena-entry-cover { min-height: 0; align-content: end; padding: 29px; border-radius: 0; }
+  #lanyu-arena .arena-entry-cover .arena-hero-copy { max-width: 100%; }
+  #lanyu-arena .arena-entry-cover.has-image .arena-hero-image { object-position: 64% center; }
+  #lanyu-arena .arena-entry-card .arena-entry-cover.has-image::after { background: linear-gradient(0deg,#081a42fb 0%,#081a42d5 24%,#081a4236 58%,#102d6812 100%); }
+  #lanyu-arena .arena-entry-cover h2 { margin-top: 8px; font-size: 29px; line-height: 1.22; font-weight: 750; letter-spacing: -.03em; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-entry-cover .arena-art { inset: 5% 0 auto; width: 100%; height: 66%; }
+  #lanyu-arena .arena-entry-cover .arena-art-shield { transform: translate(-50%, -50%) rotate(-9deg) scale(1.24); }
+  #lanyu-arena .arena-entry-form { align-self: center; justify-self: center; display: grid; gap: 14px; width: min(100%, 374px); padding: 30px; }
+  #lanyu-arena .arena-entry-form h1 { font-size: 27px; line-height: 1.25; font-weight: 750; letter-spacing: -.03em; }
+  #lanyu-arena .arena-entry-form > header { margin-bottom: 6px; }
+  #lanyu-arena .arena-entry-form .arena-input { min-height: 42px; }
+  #lanyu-arena .arena-entry-form .arena-btn { width: 100%; min-height: 42px; margin-top: 3px; }
+  #lanyu-arena .arena-frame { display: grid; grid-template-columns: var(--arena-side-width) minmax(0, 1fr); min-height: 680px; background: var(--arena-bg); }
+  #lanyu-arena .arena-side { min-width: 0; display: flex; flex-direction: column; padding: 24px 11px 15px; border-right: 1px solid var(--arena-border); background: var(--arena-paper); }
+  #lanyu-arena .arena-side-label { margin: 0 9px 10px; color: var(--arena-muted); font-size: 11px; font-weight: 650; }
+  #lanyu-arena .arena-nav { display: grid; align-content: start; gap: 4px; }
+  #lanyu-arena .arena-nav button { position: relative; display: flex; align-items: center; gap: 9px; min-height: 41px; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; color: var(--arena-muted); background: transparent; font-size: 13px; white-space: nowrap; }
+  #lanyu-arena .arena-nav button:hover { color: var(--arena-blue-ink); background: var(--arena-soft); }
+  #lanyu-arena .arena-nav button[aria-current="page"] { color: var(--arena-blue-ink); background: var(--arena-soft); border-color: color-mix(in srgb, var(--arena-blue) 12%, white); font-weight: 700; }
+  #lanyu-arena .arena-nav button[aria-current="page"]::before { content: ""; position: absolute; width: 3px; top: 11px; bottom: 11px; left: -1px; border-radius: 0 3px 3px 0; background: var(--arena-blue); }
+  #lanyu-arena .arena-profile { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 12px 5px 0; border-top: 1px solid var(--arena-border); }
+  #lanyu-arena .arena-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 33px; height: 33px; border-radius: 9px; background: var(--arena-soft); color: var(--arena-blue-ink); font: 700 11px/1 var(--arena-mono); }
+  #lanyu-arena .arena-profile strong { font-size: 13px; }
+  #lanyu-arena .arena-main { display: grid; align-content: start; gap: 18px; min-width: 0; padding: var(--arena-main-pad); }
+  #lanyu-arena .arena-page-head { display: flex; gap: 12px; justify-content: space-between; align-items: flex-end; }
+  #lanyu-arena .arena-page-head h1 { font-size: 28px; line-height: 1.22; font-weight: 750; letter-spacing: -.025em; }
+  #lanyu-arena .arena-page-head p { margin-top: 6px; font-size: 13px; color: var(--arena-muted); }
+  #lanyu-arena .arena-page-head > div:first-child { min-width: 0; }
+  #lanyu-arena .arena-head-action { flex: 0 0 auto; }
+  #lanyu-arena .arena-panel { min-width: 0; background: var(--arena-paper); border: 1px solid var(--arena-border); border-radius: var(--arena-radius); box-shadow: 0 2px 6px #13285305; }
+  #lanyu-arena .arena-panel-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 16px; }
+  #lanyu-arena .arena-section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+  #lanyu-arena .arena-section-head h2, #lanyu-arena .arena-panel-head h2 { font-size: 16px; line-height: 1.3; font-weight: 720; }
+  #lanyu-arena .arena-section-head > span { color: var(--arena-muted); font-size: 12px; }
+  #lanyu-arena .arena-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+  #lanyu-arena .arena-split { grid-template-columns: minmax(0, 1.42fr) minmax(0, 1fr); }
+  #lanyu-arena .arena-stack { display: grid; gap: 14px; min-width: 0; }
+  #lanyu-arena .arena-pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 99px; padding: 3px 8px; background: var(--arena-soft); color: var(--arena-blue-ink); font-size: 11px; line-height: 1.55; font-weight: 650; white-space: nowrap; }
+  #lanyu-arena .arena-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+  #lanyu-arena .arena-pill.success { background: #eaf7f2; color: #176848; }
+  #lanyu-arena .arena-pill.warning { background: #fff4e4; color: #89510c; }
+  #lanyu-arena .arena-pill.error { background: #fdecf0; color: #9f2c44; }
+  #lanyu-arena .arena-pill.neutral { background: #edf1f6; color: #52637a; }
+  #lanyu-arena .arena-pill.hero-status { background: #b8d1ff24; color: #ffffff; border: 1px solid #cfe1ff55; padding: 4px 9px; }
+  #lanyu-arena .arena-pill.hero-status::before { background: #83f1d0; box-shadow: 0 0 8px #a7ffed60; }
+  #lanyu-arena .arena-btn { min-height: 36px; max-width: 100%; display: inline-flex; justify-content: center; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--arena-border); border-radius: min(var(--arena-radius), 9px); background: var(--arena-paper); color: var(--arena-ink); font-size: 12px; font-weight: 650; white-space: nowrap; }
+  #lanyu-arena a.arena-btn { text-decoration: none; }
+  #lanyu-arena .arena-btn:hover { border-color: var(--arena-blue); color: var(--arena-blue-ink); }
+  #lanyu-arena .arena-btn.primary { background: var(--arena-blue); color: white; border-color: transparent; }
+  #lanyu-arena .arena-btn.primary:hover { background: var(--arena-blue-ink); }
+  #lanyu-arena .arena-btn .arena-icon, #lanyu-arena .arena-link .arena-icon { width: 15px; height: 15px; }
+  #lanyu-arena .arena-link { display: inline-flex; align-items: center; gap: 4px; color: var(--arena-blue-ink); background: transparent; border: 0; padding: 2px 0; font-size: 12px; font-weight: 670; white-space: nowrap; }
+  #lanyu-arena .arena-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+  #lanyu-arena .arena-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  #lanyu-arena .arena-hero { position: relative; overflow: hidden; min-height: 218px; display: grid; align-content: center; padding: 23px 27px; isolation: isolate; border-radius: calc(var(--arena-radius) + 2px); color: white; background: linear-gradient(113deg, var(--arena-navy) 1%, color-mix(in srgb, var(--arena-blue) 53%, var(--arena-navy)) 54%, color-mix(in srgb, var(--arena-blue) 89%, #4d91ff) 100%); }
+  #lanyu-arena .arena-hero::before { content: ""; position: absolute; z-index: -2; inset: 0 0 0 34%; opacity: .65; background: linear-gradient(#bcd7ff22 1px, transparent 1px) 0 0 / 24px 24px, linear-gradient(90deg, #bcd7ff22 1px, transparent 1px) 0 0 / 24px 24px; mask-image: linear-gradient(90deg, transparent, #000 50%); }
+  #lanyu-arena .arena-hero::after { content: ""; position: absolute; z-index: -2; inset: 0; background: radial-gradient(ellipse at 83% 51%, #7dbaff40, transparent 36%); }
+  #lanyu-arena .arena-hero-image { position: absolute; z-index: -2; inset: 0; display: block; width: 100%; height: 100%; max-width: none; object-fit: cover; object-position: center; }
+  #lanyu-arena .arena-hero.has-image::before { content: none; }
+  #lanyu-arena .arena-hero.has-image::after { z-index: -1; background: linear-gradient(90deg, #081a42f2 0%, #0b245ac9 46%, #0b245a58 100%); }
+  #lanyu-arena .arena-hero-copy { min-width: 0; max-width: 65%; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-hero-title { margin-top: 9px; font-size: clamp(27px, 4.1vw, 38px); line-height: 1.18; letter-spacing: -.035em; font-weight: 760; }
+  #lanyu-arena .arena-hero p { margin-top: 8px; color: #e2edff; font-size: 13px; }
+  #lanyu-arena .arena-hero-date { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 16px; color: #edf4ff; font-size: 12px; }
+  #lanyu-arena .arena-hero-date .arena-icon { width: 15px; height: 15px; color: #a5c5ff; }
+  #lanyu-arena .arena-art { position: absolute; inset: 0 2% 0 auto; z-index: -1; width: min(42%, 344px); pointer-events: none; }
+  #lanyu-arena .arena-art-orbit { position: absolute; top: 57%; left: 52%; width: 82%; height: 41%; border: 1px solid #bbd6ff63; border-radius: 50%; transform: translate(-50%, -50%) rotate(-21deg); box-shadow: 0 0 20px #8bc4ff20, inset 0 0 14px #8bc4ff18; }
+  #lanyu-arena .arena-art-orbit.outer { width: 97%; height: 59%; border-color: #c4ddff34; }
+  #lanyu-arena .arena-art-orbit::after { content: ""; position: absolute; width: 6px; height: 6px; background: #def1ff; box-shadow: 0 0 11px #c1e8ff; border-radius: 50%; top: 13%; left: 14%; }
+  #lanyu-arena .arena-art-orbit.outer::after { top: 60%; left: auto; right: 1%; width: 4px; height: 4px; }
+  #lanyu-arena .arena-art-shield { position: absolute; width: 124px; height: 146px; left: 52%; top: 48%; transform: translate(-50%, -50%) rotate(-9deg); filter: drop-shadow(9px 12px 11px #07235a80) drop-shadow(0 0 14px #9cd2ff60); }
+  #lanyu-arena .arena-art-shield::before, #lanyu-arena .arena-art-shield::after, #lanyu-arena .arena-art-shield > span { content: ""; position: absolute; clip-path: polygon(50% 1%, 96% 17%, 93% 56%, 85% 73%, 69% 88%, 50% 100%, 31% 88%, 15% 73%, 7% 56%, 4% 17%); }
+  #lanyu-arena .arena-art-shield::before { inset: 0; background: linear-gradient(145deg, #f2f9ff, #87b9ff 43%, #487cf0 73%, #b2dbff); }
+  #lanyu-arena .arena-art-shield::after { inset: 2px; background: linear-gradient(158deg, #5a8af1, #204caa 50%, #173980 90%); }
+  #lanyu-arena .arena-art-shield > span { z-index: 1; inset: 11px; display: grid; place-items: center; padding-bottom: 6px; color: #edf8ff; background: linear-gradient(154deg, #a3cdff96, #81b5ff24 44%, #1a48a55c 46%, #3c7de34d); }
+  #lanyu-arena .arena-art-shield .arena-icon { width: 44px; height: 44px; filter: drop-shadow(0 0 10px #d8f1ff9e); transform: rotate(9deg); }
+  #lanyu-arena .arena-art-shield .arena-icon-fallback { font-size: 39px; }
+  #lanyu-arena .arena-art-node { position: absolute; left: 13%; top: 19%; width: 32px; height: 14px; border: solid #b4d4ff88; border-width: 1px 0 0 1px; }
+  #lanyu-arena .arena-art-node:last-child { top: auto; left: auto; bottom: 17%; right: 12%; transform: rotate(180deg); }
+  #lanyu-arena .arena-mode-grid { align-items: stretch; }
+  #lanyu-arena .arena-mode-card { position: relative; display: grid; align-content: start; gap: 12px; padding: 15px; color: var(--arena-ink); text-align: left; }
+  #lanyu-arena .arena-mode-card:hover, #lanyu-arena .arena-task:hover { border-color: color-mix(in srgb, var(--arena-blue) 49%, white); box-shadow: 0 3px 14px #1c4a9912; }
+  #lanyu-arena .arena-mode-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+  #lanyu-arena .arena-mode-head h3 { font-size: 16px; font-weight: 730; }
+  #lanyu-arena .arena-mode-head p { margin-top: 3px; font-size: 12px; color: var(--arena-muted); }
+  #lanyu-arena .arena-icon-box { display: grid; place-items: center; flex: 0 0 auto; width: 39px; height: 39px; border-radius: 9px; background: var(--arena-soft); color: var(--arena-blue-ink); }
+  #lanyu-arena .arena-icon-box.alt { background: #e8f4ff; color: #115caa; }
+  #lanyu-arena .arena-icon-box .arena-icon { width: 20px; height: 20px; }
+  #lanyu-arena .arena-arrow { color: var(--arena-blue-ink); }
+  #lanyu-arena .arena-mode-metrics { display: flex; flex-wrap: wrap; column-gap: 17px; row-gap: 4px; align-items: center; border-top: 1px solid var(--arena-border); padding-top: 10px; color: var(--arena-muted); font-size: 12px; }
+  #lanyu-arena .arena-mode-metrics strong { color: var(--arena-ink); font-size: 13px; font-weight: 720; }
+  #lanyu-arena .arena-notices { padding: 0 15px 3px; }
+  #lanyu-arena .arena-notice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 10px 0; align-items: baseline; border-top: 1px solid var(--arena-border); }
+  #lanyu-arena .arena-notice > i { width: 6px; height: 6px; border-radius: 50%; background: var(--arena-blue); align-self: start; margin-top: 7px; }
+  #lanyu-arena .arena-notice strong { font-size: 12px; font-weight: 680; }
+  #lanyu-arena .arena-notice p { margin-top: 2px; color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-notice time { font-size: 11px; color: var(--arena-muted); }
+  #lanyu-arena .arena-home-score { display: grid; gap: 9px; padding: 0 15px 12px; }
+  #lanyu-arena .arena-home-score > div { display: flex; align-items: center; justify-content: space-between; gap: 6px; border-top: 1px solid var(--arena-border); padding-top: 9px; }
+  #lanyu-arena .arena-home-score strong { font-size: 16px; font-weight: 760; }
+  #lanyu-arena .arena-home-score small { margin-left: 4px; color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-tabs { display: flex; gap: 4px 19px; flex-wrap: wrap; border-bottom: 1px solid var(--arena-border); }
+  #lanyu-arena .arena-tabs button { background: transparent; color: var(--arena-muted); border: 0; border-bottom: 2px solid transparent; padding: 7px 1px 9px; font-size: 13px; font-weight: 650; white-space: nowrap; }
+  #lanyu-arena .arena-tabs button:hover, #lanyu-arena .arena-tabs button[aria-pressed="true"] { color: var(--arena-blue-ink); }
+  #lanyu-arena .arena-tabs button[aria-pressed="true"] { border-bottom-color: var(--arena-blue); }
+  #lanyu-arena .arena-filters { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  #lanyu-arena .arena-filters .arena-tabs { gap: 4px 15px; }
+  #lanyu-arena .arena-select-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+  #lanyu-arena .arena-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+  #lanyu-arena .arena-task { display: grid; gap: 10px; padding: 13px; color: var(--arena-ink); }
+  #lanyu-arena .arena-task-top, #lanyu-arena .arena-task-bottom { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+  #lanyu-arena .arena-task-top .arena-icon-box { width: 33px; height: 33px; }
+  #lanyu-arena .arena-task-top .arena-icon-box .arena-icon { width: 17px; height: 17px; }
+  #lanyu-arena .arena-task h2 { font-size: 16px; line-height: 1.35; font-weight: 720; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-task p { margin-top: 2px; color: var(--arena-muted); font-size: 12px; }
+  #lanyu-arena .arena-task-bottom { border-top: 1px solid var(--arena-border); padding-top: 8px; }
+  #lanyu-arena .arena-task-bottom strong { color: var(--arena-blue-ink); font-size: 16px; font-weight: 750; }
+  #lanyu-arena .arena-task-bottom small { color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-detail-copy { display: grid; gap: 12px; padding: 0 16px 17px; }
+  #lanyu-arena .arena-detail-copy p { color: var(--arena-muted); font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-detail-data { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; border-top: 1px solid var(--arena-border); padding-top: 11px; }
+  #lanyu-arena .arena-detail-data dt { color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-detail-data dd { margin: 3px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-attachments { display: grid; gap: 7px; border-top: 1px solid var(--arena-border); padding-top: 11px; }
+  #lanyu-arena .arena-attachments h3 { font-size: 12px; font-weight: 700; }
+  #lanyu-arena .arena-attachment { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 8px; min-width: 0; padding: 6px 8px; background: var(--arena-bg); border: 1px solid var(--arena-border); border-radius: 8px; }
+  #lanyu-arena .arena-attachment-name { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-attachment-name .arena-icon { color: var(--arena-blue-ink); }
+  #lanyu-arena .arena-attachment .arena-btn { min-height: 30px; padding: 3px 6px; }
+  #lanyu-arena .arena-attachment-preview { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 11px; border-radius: 8px; border: 1px solid var(--arena-border); background: var(--arena-bg); color: var(--arena-ink); }
+  #lanyu-arena .arena-field { display: grid; gap: 5px; min-width: 0; color: var(--arena-ink); font-size: 12px; font-weight: 650; }
+  #lanyu-arena .arena-field small { color: var(--arena-muted); font-weight: 400; font-size: 11px; }
+  #lanyu-arena .arena-input { display: block; max-width: 100%; min-width: 0; width: 100%; min-height: 36px; padding: 6px 9px; border: 1px solid #cdd9ea; border-radius: min(var(--arena-radius), 8px); background: var(--arena-paper); color: var(--arena-ink); font-size: 13px; }
+  #lanyu-arena select.arena-input { width: auto; padding-right: 23px; }
+  #lanyu-arena .arena-field > select.arena-input { width: 100%; }
+  #lanyu-arena textarea.arena-input { min-height: 72px; resize: vertical; }
+  #lanyu-arena .arena-input::placeholder { color: #64748b; }
+  #lanyu-arena .arena-input[type="file"] { font-size: 12px; }
+  #lanyu-arena .arena-input[type="color"] { padding: 3px; width: 40px; height: 36px; flex: 0 0 auto; cursor: pointer; }
+  #lanyu-arena .arena-color { display: flex; align-items: center; gap: 8px; }
+  #lanyu-arena .arena-form { display: grid; gap: 12px; padding: 0 16px 16px; min-width: 0; }
+  #lanyu-arena .arena-feedback { padding: 8px 10px; border-radius: 7px; background: var(--arena-soft); color: var(--arena-blue-ink); font-size: 12px; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-feedback.success { background: #eaf7f2; color: #176848; }
+  #lanyu-arena .arena-feedback.error { background: #fdecf0; color: #9f2c44; }
+  #lanyu-arena .arena-empty { padding: 22px 15px; color: var(--arena-muted); text-align: center; font-size: 13px; }
+  #lanyu-arena .arena-round { padding: 13px 15px 14px; }
+  #lanyu-arena .arena-round-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 9px; margin-bottom: 10px; }
+  #lanyu-arena .arena-round-head h2 { font-size: 15px; font-weight: 720; }
+  #lanyu-arena .arena-round-head p { margin-top: 2px; color: var(--arena-muted); font-size: 12px; }
+  #lanyu-arena .arena-round-time { color: var(--arena-blue-ink); font: 700 22px/1.15 var(--arena-mono); text-align: right; white-space: nowrap; }
+  #lanyu-arena .arena-round-time small { display: block; margin-top: 3px; color: var(--arena-muted); font: 11px/1.4 Inter, "Microsoft YaHei UI", sans-serif; }
+  #lanyu-arena .arena-round-bars { display: grid; grid-template-columns: repeat(16, 1fr); gap: 4px; }
+  #lanyu-arena .arena-round-bars span { height: 6px; border-radius: 2px; background: #e8eef7; }
+  #lanyu-arena .arena-round-bars span.complete { background: color-mix(in srgb, var(--arena-blue) 64%, white); }
+  #lanyu-arena .arena-round-bars span.current { background: var(--arena-blue); box-shadow: 0 0 0 2px var(--arena-soft); }
+  #lanyu-arena .arena-round-labels { display: flex; justify-content: space-between; margin-top: 6px; gap: 7px; color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  #lanyu-arena .arena-kpi { display: grid; gap: 3px; padding: 11px 13px; }
+  #lanyu-arena .arena-kpi > span { color: var(--arena-muted); font-size: 11px; font-weight: 600; }
+  #lanyu-arena .arena-kpi strong { font-size: 23px; line-height: 1.22; font-weight: 760; letter-spacing: -.035em; }
+  #lanyu-arena .arena-kpi small { font-size: 11px; color: var(--arena-muted); }
+  #lanyu-arena .arena-kpi small.positive, #lanyu-arena .arena-positive { color: #176848; }
+  #lanyu-arena .arena-negative { color: #9f2c44; }
+  #lanyu-arena .arena-chart-wrap { min-width: 0; padding: 0 11px 10px 8px; }
+  #lanyu-arena .arena-chart-wrap canvas { display: block; width: 100%; height: 167px; }
+  #lanyu-arena .arena-events { display: grid; padding: 0 14px 5px; }
+  #lanyu-arena .arena-event { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 7px; border-top: 1px solid var(--arena-border); padding: 9px 0; }
+  #lanyu-arena .arena-event time { color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-event strong, #lanyu-arena .arena-event b { font-size: 12px; }
+  #lanyu-arena .arena-event small { display: block; color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; }
+  #lanyu-arena .arena-table { width: 100%; border-collapse: collapse; border-spacing: 0; text-align: left; font-size: 12px; }
+  #lanyu-arena .arena-table caption { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; white-space: nowrap; }
+  #lanyu-arena .arena-table th, #lanyu-arena .arena-table td { border: 0; border-bottom: 1px solid var(--arena-border); padding: 10px 12px; background: transparent; color: inherit; }
+  #lanyu-arena .arena-table th { white-space: nowrap; background: #f5f8fd; color: var(--arena-muted); font-size: 11px; font-weight: 680; }
+  #lanyu-arena .arena-table tbody tr:last-child td { border-bottom: 0; }
+  #lanyu-arena .arena-table tbody tr.arena-ours { background: var(--arena-soft); }
+  #lanyu-arena .arena-table td:first-child, #lanyu-arena .arena-table th:first-child { padding-left: 15px; }
+  #lanyu-arena .arena-table td:last-child, #lanyu-arena .arena-table th:last-child { padding-right: 15px; }
+  #lanyu-arena .arena-table .arena-nowrap { white-space: nowrap; }
+  #lanyu-arena .arena-table .arena-score { color: var(--arena-blue-ink); font-weight: 740; }
+  #lanyu-arena .arena-rank { display: inline-grid; min-width: 25px; height: 25px; place-items: center; border-radius: 6px; color: var(--arena-muted); background: #edf2f8; font: 700 12px/1 var(--arena-mono); }
+  #lanyu-arena .arena-rank.leading { background: #deebff; color: var(--arena-blue-ink); }
+  #lanyu-arena .arena-team { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 680; }
+  #lanyu-arena .arena-team small { padding: 1px 4px; border-radius: 3px; background: #dbe8ff; color: var(--arena-blue-ink); font-size: 10px; font-weight: 650; }
+  #lanyu-arena .arena-table-note { margin: 0; padding: 8px 15px; border-top: 1px solid var(--arena-border); color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-back { justify-self: start; margin-bottom: -5px; }
+  #lanyu-arena .arena-dialog { width: min(480px, calc(100% - 32px)); max-height: min(620px, 86vh); margin: auto; padding: 0; color: var(--arena-ink); border: 1px solid var(--arena-border); border-radius: calc(var(--arena-radius) + 2px); background: var(--arena-paper); box-shadow: 0 20px 65px #081c5940; }
+  #lanyu-arena .arena-dialog.banner-preview { width: min(760px, calc(100% - 32px)); }
+  #lanyu-arena .arena-dialog::backdrop { background: #101f3c60; }
+  #lanyu-arena .arena-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; padding: 15px 16px; }
+  #lanyu-arena .arena-dialog-head h2 { font-size: 19px; line-height: 1.3; font-weight: 740; }
+  #lanyu-arena .arena-dialog-head p { color: var(--arena-muted); margin-top: 3px; font-size: 12px; }
+  #lanyu-arena .arena-dialog-head .arena-btn { min-height: 29px; padding: 3px 6px; }
+  #lanyu-arena .arena-dialog-body { padding: 0 16px 15px; display: grid; gap: 10px; }
+  #lanyu-arena .arena-contest-choice { min-width: 0; display: grid; grid-template-columns: 64px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 8px; border: 1px solid var(--arena-border); border-radius: var(--arena-radius); background: var(--arena-bg); }
+  #lanyu-arena .arena-contest-choice strong { display: block; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-contest-choice small { display: block; color: var(--arena-muted); font-size: 11px; }
+  #lanyu-arena .arena-contest-thumb { width: 64px; height: 42px; border-radius: 6px; overflow: hidden; background: linear-gradient(135deg, var(--arena-navy), var(--arena-blue)); }
+  #lanyu-arena .arena-contest-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  #lanyu-arena .arena-outcome { display: flex; align-items: center; gap: 10px; min-height: 58px; padding: 9px 10px; font-size: 13px; }
+  #lanyu-arena .arena-outcome .arena-icon { width: 24px; height: 24px; }
+  #lanyu-arena .arena-outcome .arena-icon-fallback { font-size: 23px; }
+  #lanyu-arena .arena-brand-preview { background: var(--preview-bg, var(--arena-bg)); border: 1px solid var(--arena-border); border-radius: var(--preview-radius, var(--arena-radius)); overflow: hidden; margin: 0 13px 13px; }
+  #lanyu-arena .arena-brand-preview header { display: flex; align-items: center; gap: 7px; min-width: 0; background: var(--preview-paper, var(--arena-paper)); padding: 8px; }
+  #lanyu-arena .arena-brand-preview header strong { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #lanyu-arena .arena-brand-preview .arena-mark { --arena-blue: var(--preview-blue, #2458d8); width: 25px; height: 25px; border-radius: 6px; }
+  #lanyu-arena .arena-brand-preview .arena-mark .arena-icon { width: 15px; height: 15px; }
+  #lanyu-arena .arena-brand-mini-main { display: grid; gap: 8px; padding: 8px; }
+  #lanyu-arena .arena-brand-mini-hero { position: relative; isolation: isolate; overflow: hidden; padding: 11px; background: linear-gradient(125deg, var(--arena-navy), var(--preview-blue, var(--arena-blue))); color: white; border-radius: var(--preview-radius, var(--arena-radius)); overflow-wrap: anywhere; }
+  #lanyu-arena .arena-brand-mini-hero.has-image::after { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, #081a42f2, #0b245a90); }
+  #lanyu-arena .arena-brand-mini-hero h3 { font-size: 16px; }
+  #lanyu-arena .arena-brand-mini-hero p { margin-top: 3px; color: #edf4ff; font-size: 11px; }
+  #lanyu-arena .arena-brand-sample { display: grid; gap: 6px; padding: 8px; background: var(--preview-paper, var(--arena-paper)); border: 1px solid var(--arena-border); border-radius: var(--preview-radius, var(--arena-radius)); }
+  #lanyu-arena .arena-brand-sample strong { font-size: 12px; }
+  #lanyu-arena .arena-sample-action { justify-self: start; padding: 4px 8px; background: var(--preview-blue, var(--arena-blue)); color: white; border-radius: min(9px, var(--preview-radius, var(--arena-radius))); font-size: 11px; }
+  #lanyu-arena .arena-design-help { padding: 0 14px 13px; color: var(--arena-muted); font-size: 11px; }
+  @media (max-width: 880px) {
+    #lanyu-arena { --arena-side-width: 151px; --arena-main-pad: 18px; }
+    #lanyu-arena .arena-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #lanyu-arena .arena-table td, #lanyu-arena .arena-table th { padding-inline: 9px; }
+    #lanyu-arena .arena-mode-head { grid-template-columns: auto minmax(0, 1fr); }
+    #lanyu-arena .arena-mode-head > .arena-arrow { display: none; }
+  }
+  @media (max-width: 690px) {
+    #lanyu-arena { --arena-side-width: 132px; --arena-main-pad: 13px; }
+    #lanyu-arena .arena-side { padding-inline: 7px; }
+    #lanyu-arena .arena-brand { padding-inline: 9px; gap: 7px; }
+    #lanyu-arena .arena-two.arena-split { grid-template-columns: 1fr; }
+    #lanyu-arena .arena-hero { min-height: 196px; padding: 17px; }
+    #lanyu-arena .arena-art-shield { transform: translate(-50%, -50%) rotate(-9deg) scale(.84); }
+    #lanyu-arena .arena-mode-head { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 560px) {
+    #lanyu-arena .arena-top { grid-template-columns: minmax(0, 1fr) auto; }
+    #lanyu-arena .arena-brand { border-right: 0; height: 52px; }
+    #lanyu-arena .arena-crumb { display: none; }
+    #lanyu-arena .arena-entry-main { min-height: 0; padding-block: 20px; }
+    #lanyu-arena .arena-entry-card { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    #lanyu-arena .arena-entry-card .arena-entry-cover { min-height: 175px; padding: 16px; }
+    #lanyu-arena .arena-entry-cover .arena-hero-copy { max-width: 78%; }
+    #lanyu-arena .arena-entry-cover.has-image .arena-hero-copy { max-width: 100%; }
+    #lanyu-arena .arena-entry-cover .arena-art { inset: 0 -1% 0 auto; width: 40%; height: 100%; }
+    #lanyu-arena .arena-entry-cover .arena-art-shield { transform: translate(-50%, -50%) rotate(-9deg) scale(.63); }
+    #lanyu-arena .arena-entry-cover h2 { font-size: 24px; }
+    #lanyu-arena .arena-entry-form { padding: 22px 16px; }
+    #lanyu-arena .arena-frame { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    #lanyu-arena .arena-side { padding: 6px 9px; border: 0; border-bottom: 1px solid var(--arena-border); }
+    #lanyu-arena .arena-side-label, #lanyu-arena .arena-profile { display: none; }
+    #lanyu-arena .arena-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+    #lanyu-arena .arena-nav button { min-height: 34px; font-size: 12px; padding: 5px 7px; gap: 4px; }
+    #lanyu-arena .arena-nav button .arena-icon { width: 14px; height: 14px; }
+    #lanyu-arena .arena-hero { min-height: 176px; }
+    #lanyu-arena .arena-hero-copy { max-width: 76%; }
+    #lanyu-arena .arena-art { width: 36%; opacity: .6; right: -1%; }
+    #lanyu-arena .arena-art-shield { transform: translate(-50%, -50%) rotate(-9deg) scale(.62); }
+    #lanyu-arena .arena-two { grid-template-columns: minmax(0, 1fr); }
+    #lanyu-arena .arena-mode-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+    #lanyu-arena .arena-mode-head > .arena-arrow { display: inline-grid; }
+    #lanyu-arena .arena-page-head { align-items: flex-start; flex-wrap: wrap; }
+    #lanyu-arena .arena-kpi { padding: 8px; }
+    #lanyu-arena .arena-kpi strong { font-size: 18px; }
+    #lanyu-arena .arena-contest-choice { grid-template-columns: minmax(0,1fr) auto; }
+    #lanyu-arena .arena-contest-thumb { display: none; }
+  }
+
+body { margin: 0; background: #f2f5fb; }
+#lanyu-arena a.arena-brand, #lanyu-arena a.arena-link, #lanyu-arena a.arena-task,
+#lanyu-arena a.arena-mode-card, #lanyu-arena .arena-nav a, #lanyu-arena .arena-tabs a { text-decoration: none; }
+#lanyu-arena .arena-frame { min-height: calc(100vh - 64px); }
+#lanyu-arena .arena-frame.standalone { grid-template-columns: minmax(0, 1fr); }
+#lanyu-arena .arena-main { width: 100%; max-width: 1440px; margin-inline: auto; }
+#lanyu-arena .arena-entry-main { min-height: max(510px, calc(100vh - 64px)); }
+#lanyu-arena .arena-nav a {
+  position: relative; display: flex; align-items: center; gap: 9px; min-height: 41px; padding: 8px 9px;
+  border: 1px solid transparent; border-radius: 8px; color: var(--arena-muted); font-size: 13px; white-space: nowrap;
+}
+#lanyu-arena .arena-nav a:hover, #lanyu-arena .arena-nav a[aria-current="page"] {
+  color: var(--arena-blue-ink); background: var(--arena-soft);
+}
+#lanyu-arena .arena-nav a[aria-current="page"] {
+  border-color: color-mix(in srgb, var(--arena-blue) 12%, white); font-weight: 700;
+}
+#lanyu-arena .arena-nav a[aria-current="page"]::before {
+  content: ""; position: absolute; width: 3px; top: 11px; bottom: 11px; left: -1px;
+  border-radius: 0 3px 3px 0; background: var(--arena-blue);
+}
+#lanyu-arena .arena-scope {
+  display: grid; gap: 2px; margin: 14px 4px; padding: 8px 9px; overflow-wrap: anywhere;
+  border: 1px solid var(--arena-border); border-radius: 8px; background: var(--arena-bg); color: var(--arena-ink);
+  text-decoration: none; font-size: 12px;
+}
+#lanyu-arena .arena-scope small, #lanyu-arena .arena-profile small { display: block; color: var(--arena-muted); font-size: 11px; }
+#lanyu-arena .arena-tabs a {
+  color: var(--arena-muted); border-bottom: 2px solid transparent; padding: 7px 1px 9px;
+  font-size: 13px; font-weight: 650; white-space: nowrap;
+}
+#lanyu-arena .arena-tabs a:hover, #lanyu-arena .arena-tabs a[aria-current="page"] { color: var(--arena-blue-ink); }
+#lanyu-arena .arena-tabs a[aria-current="page"] { border-color: var(--arena-blue); }
+#lanyu-arena .arena-pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#lanyu-arena .arena-form-narrow { max-width: 760px; }
+#lanyu-arena .arena-checkbox { display: inline-flex; align-items: center; gap: 7px; color: var(--arena-ink); font-size: 12px; }
+#lanyu-arena .arena-checkbox input { accent-color: var(--arena-blue); }
+#lanyu-arena .arena-cover-preview { width: min(100%, 540px); max-height: 210px; object-fit: cover; border-radius: var(--arena-radius); }
+#lanyu-arena .arena-trend { display: flex; align-items: end; gap: 10px; padding: 0 16px 15px; min-height: 130px; }
+#lanyu-arena .arena-trend-point { flex: 1 1 0; min-width: 0; display: grid; justify-items: center; gap: 5px; color: var(--arena-blue-ink); font-size: 12px; }
+#lanyu-arena .arena-trend-track { width: min(38px, 70%); height: 72px; display: flex; align-items: end; background: var(--arena-soft); border-radius: 4px; overflow: hidden; }
+#lanyu-arena .arena-trend-track i { width: 100%; background: linear-gradient(0deg, var(--arena-blue), #77a8ff); }
+#lanyu-arena .arena-trend-point small { color: var(--arena-muted); font-family: var(--arena-mono); }
+
+@media (max-width: 560px) {
+  #lanyu-arena .arena-nav a { min-height: 34px; padding: 5px 7px; font-size: 12px; gap: 4px; }
+  #lanyu-arena .arena-scope { display: none; }
+}

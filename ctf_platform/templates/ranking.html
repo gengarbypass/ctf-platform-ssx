@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("排行榜", "按比赛模式查看队伍排名与积分。") %}
+    {{ ui.link("计分板大屏", url_for('site.scoreboard', kind=kind), "primary", "screen") }}
+  {% endcall %}
+  <nav class="arena-tabs" aria-label="榜单导航">
+    <a href="{{ url_for('site.ranking', kind='puzzle') }}"{% if kind == 'puzzle' %} aria-current="page"{% endif %}>解题排行</a>
+    <a href="{{ url_for('site.ranking', kind='round') }}"{% if kind == 'round' %} aria-current="page"{% endif %}>AWDP 排行</a>
+  </nav>
+  {% call ui.panel("队伍排名") %}
+    {% if standings %}
+    <div class="arena-table-wrap"><table class="arena-table"><caption>队伍排名</caption>
+      <thead><tr><th scope="col">名次</th><th scope="col">队伍</th>
+        {% if kind == 'puzzle' %}<th scope="col">已解题目</th>{% else %}<th scope="col">攻防</th><th scope="col">加固</th><th scope="col">可用性</th>{% endif %}<th scope="col">积分</th>
+      </tr></thead>
+      <tbody>{% for row in standings %}<tr{% if g.team and row.id == g.team.id %} class="arena-ours"{% endif %}>
+        <td><span class="arena-rank {{ 'leading' if loop.index <= 3 else '' }}">{{ loop.index }}</span></td>
+        <td><span class="arena-team">{{ row.name }}{% if g.team and row.id == g.team.id %}<small>本队</small>{% endif %}</span></td>
+        {% if kind == 'puzzle' %}<td>{{ row.solved }} 道</td>{% else %}<td>{{ row.attack }}</td><td>{{ row.defense }}</td><td>{{ row.uptime }}</td>{% endif %}
+        <td class="arena-score arena-number">{{ '{:,}'.format(row.points) }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}{{ ui.empty("暂无队伍排名。") }}{% endif %}
+  {% endcall %}
+{% endblock %}

@@ -1,0 +1,80 @@
+{%- macro trophy(rank, compact=false) -%}
+  <span class="sb-trophy {{ ['gold','silver','bronze'][rank-1] }}{% if compact %} compact{% endif %}" role="img" aria-label="{{ ['金色奖杯','银色奖杯','铜色奖杯'][rank-1] }}"><span class="sb-cup" aria-hidden="true"><i></i><b></b></span></span>
+{%- endmacro -%}
+{%- macro score(value) -%}<b data-sb-value="{{ value }}">{{ '{:,}'.format(value) }}</b>{%- endmacro -%}
+{%- macro shift() -%}<span class="sb-shift" data-sb-shift aria-label="名次无变化">—</span>{%- endmacro -%}
+{%- macro health(value, label=true) -%}
+  <span class="sb-health-chip {{ {'healthy':'','unhealthy':'bad','maintenance':'maintenance','unknown':'unknown'}[value] }}"{% if label %} role="img" aria-label="{{ service_states[value] }}"{% else %} aria-hidden="true"{% endif %}>{{ {'healthy':'✓','unhealthy':'×','maintenance':'–','unknown':'?'}[value] }}</span>
+{%- endmacro -%}
+{%- macro scores(rows, puzzle) -%}
+  <div class="sb-table-frame"><table class="sb-table {{ '' if puzzle else 'sb-table-round' }}" aria-label="{{ '其余队伍排名' if puzzle else '回合总分排名' }}">
+    <thead><tr><th scope="col">名次</th><th scope="col">队伍</th>
+      {% if puzzle %}<th scope="col" class="sb-number-col">已解</th>{% else %}<th scope="col" class="sb-number-col">攻防</th><th scope="col" class="sb-number-col">加固</th><th scope="col" class="sb-number-col">可用性</th>{% endif %}
+      <th scope="col" class="sb-number-col">{{ '积分' if puzzle else '总分' }}</th><th scope="col" class="sb-number-col">名次变化</th>
+    </tr></thead>
+    <tbody>{% for team in rows %}{% set rank = loop.index + (3 if puzzle else 0) %}<tr data-sb-team="{{ team.id }}" data-sb-rank="{{ rank }}"{% if not puzzle and rank <= 3 %} class="is-leading"{% endif %}>
+      <td><span class="sb-rank-badge">{% if not puzzle and rank <= 3 %}{{ trophy(rank, true) }}{% endif %}<span class="sb-rank">#{{ '%02d'|format(rank) }}</span></span></td>
+      <td><strong class="sb-name">{{ team.name }}</strong></td>
+      {% if puzzle %}<td class="sb-number-col"><span class="sb-solve-count">{{ team.solved }} 题</span></td>
+      {% else %}<td class="sb-number-col">{{ team.attack }}</td><td class="sb-number-col">{{ team.defense }}</td><td class="sb-number-col">{{ team.uptime }}</td>{% endif %}
+      <td class="sb-number-col">{{ score(team.points) }}</td><td class="sb-number-col">{{ shift() }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+{%- endmacro -%}
+{%- macro feed(events, puzzle) -%}
+  <section class="sb-panel"><header class="sb-panel-header"><h2>{{ '解出动态' if puzzle else '本轮得分动态' }}</h2><small>{{ timezone }}</small></header>
+    {% if events %}
+      <ol class="sb-feed-list">{% for event in events %}{% set delta = event.points if puzzle else event.delta %}
+        <li class="sb-feed-item{% if loop.first %} is-latest{% endif %}" data-sb-event="{{ event.id }}">
+          <div><strong>{{ event.team_name }}</strong><small>{{ event.title if puzzle else event.reason }}</small></div>
+          <div class="sb-feed-numeric"><b class="sb-delta {{ 'gain' if delta > 0 else 'loss' }}">{{ signed(delta) }}</b><time>{{ local_time(event.submitted_at if puzzle else event.occurred_at, '%H:%M:%S') }}</time></div>
+        </li>
+      {% endfor %}</ol>
+    {% else %}<p class="sb-empty">暂无计分动态。</p>{% endif %}
+  </section>
+{%- endmacro -%}
+{% if timing.id is none %}
+  <section class="sb-panel sb-empty-panel"><p class="sb-empty">当前没有开启的比赛。</p></section>
+{% elif kind == 'puzzle' %}
+  <section class="sb-podium-stage">
+    <header class="sb-panel-header"><h2>前三名</h2></header>
+    {% if board.teams %}
+      <div class="sb-podium" role="list" aria-label="前三名">
+        {% for team in board.teams[:3] %}<div role="listitem" class="sb-podium-card {{ 'champion' if loop.first else '' }}" data-sb-team="{{ team.id }}" data-sb-rank="{{ loop.index }}" style="grid-column:{{ [2,1,3][loop.index0] }};grid-row:1">
+          <div class="sb-podium-meta"><span class="sb-rank">#{{ '%02d'|format(loop.index) }}</span>{{ shift() }}</div>
+          {{ trophy(loop.index) }}<strong class="sb-name">{{ team.name }}</strong>
+          <div class="sb-podium-score">{{ score(team.points) }}<small>分</small></div>
+          <small class="sb-podium-solved">已解 {{ team.solved }} 题</small>
+        </div>{% endfor %}
+      </div>
+    {% else %}<div class="sb-panel"><p class="sb-empty">暂无参赛队伍。</p></div>{% endif %}
+  </section>
+  <div class="sb-grid">
+    <section class="sb-panel sb-rank-panel"><header class="sb-panel-header"><h2>其余队伍</h2></header>
+      {% if board.teams|length > 3 %}{{ scores(board.teams[3:], true) }}{% else %}<p class="sb-empty">暂无其他队伍。</p>{% endif %}
+    </section>
+    {{ feed(board.events, true) }}
+  </div>
+{% else %}
+  <div class="sb-grid sb-round-layout">
+    <section class="sb-panel sb-rank-panel"><header class="sb-panel-header"><h2>回合总分</h2></header>
+      {% if board.teams %}{{ scores(board.teams, false) }}{% else %}<p class="sb-empty">暂无参赛队伍。</p>{% endif %}
+    </section>
+    <div class="sb-round-aside">
+      <section class="sb-panel">
+        <header class="sb-panel-header"><h2>服务状态</h2>{% if board.matrix.total %}<small><b class="sb-health-total">{{ board.matrix.healthy }} / {{ board.matrix.total }}</b> 正常</small>{% endif %}</header>
+        {% if board.matrix.total %}
+          <div class="sb-table-frame"><table class="sb-table sb-health-table" aria-label="队伍服务状态">
+            <thead><tr><th scope="col">队伍</th>{% for task in board.matrix.tasks %}<th scope="col">{{ task.title }}</th>{% endfor %}</tr></thead>
+            <tbody>{% for team in board.matrix.teams %}<tr><td><strong class="sb-health-name">{{ team.name }}</strong></td>
+              {% for task in board.matrix.tasks %}{% set status = board.matrix.states.get((team.id,task.id),'unknown') %}
+              <td data-sb-service="{{ team.id }}-{{ task.id }}" data-sb-health="{{ status }}">{{ health(status) }}</td>{% endfor %}
+            </tr>{% endfor %}</tbody>
+          </table></div>
+          <div class="sb-health-legend">{% for key,label in service_states.items() %}<span>{{ health(key,false) }}{{ label }}</span>{% endfor %}</div>
+        {% else %}<p class="sb-empty">暂无服务状态。</p>{% endif %}
+      </section>
+      {{ feed(board.events, false) }}
+    </div>
+  </div>
+{% endif %}

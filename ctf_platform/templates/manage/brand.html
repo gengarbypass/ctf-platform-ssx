@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("品牌与外观", "设置平台标识、蓝白主题和卡片样式。") %}
+    {{ ui.link("配置比赛封面与文案",url_for('manage.contest_edit',contest_id=g.managed.id) if g.managed else url_for('manage.contest_edit'),"","next") }}
+  {% endcall %}
+  <div class="arena-two arena-split" data-brand-editor>
+    {% call ui.panel("品牌配置") %}
+      <form class="arena-form" method="post" enctype="multipart/form-data" data-image-form>
+        {{ ui.csrf() }}
+        <div class="arena-two">
+          {{ ui.field("平台名称","name",g.brand.name,max=48) }}
+          {{ ui.select("内置图标","icon",[('flag','旗帜'),('shield','盾牌'),('code','代码')],g.brand.icon) }}
+        </div>
+        <label class="arena-field">自定义 Logo<input class="arena-input" type="file" name="logo" accept="image/png,image/jpeg,image/webp" data-image-input></label>
+        {% if g.brand.logo_id %}<label class="arena-checkbox"><input type="checkbox" name="remove_logo" value="1" data-remove-image>移除自定义 Logo</label>{% endif %}
+        <div class="arena-two">
+          {% for name, label in [('accent','主色'),('background','页面底色'),('surface','卡片底色')] %}
+          <label class="arena-field">{{ label }}<span class="arena-color"><input class="arena-input" type="color" name="{{ name }}" value="{{ g.brand[name] }}"><code data-color-value="{{ name }}">{{ g.brand[name]|upper }}</code></span></label>
+          {% endfor %}
+          {{ ui.field("卡片圆角","radius",g.brand.radius,type='number',min=4,maximum=24) }}
+        </div>
+        <div class="arena-actions"><button class="arena-btn primary" type="submit">应用平台外观</button></div>
+      </form>
+    {% endcall %}
+    {% call ui.panel("实时预览") %}
+      <div class="arena-brand-preview" data-brand-preview style="--preview-blue:{{ g.brand.accent }};--preview-bg:{{ g.brand.background }};--preview-paper:{{ g.brand.surface }};--preview-radius:{{ g.brand.radius }}px">
+        <header>
+          <span class="arena-mark"><img alt="" data-image-preview{% if g.brand.logo_id %} src="{{ url_for('site.image',file_id=g.brand.logo_id) }}"{% else %} hidden{% endif %}><span data-preview-icon{% if g.brand.logo_id %} hidden{% endif %}>{{ ui.icon(g.brand.icon) }}</span></span>
+          <strong data-preview-name>{{ g.brand.name }}</strong>
+        </header>
+        <div class="arena-brand-mini-main">
+          <div class="arena-brand-mini-hero{% if g.managed and g.managed.cover_id %} has-image{% endif %}">
+            {% if g.managed and g.managed.cover_id %}<img class="arena-hero-image" src="{{ url_for('site.image',file_id=g.managed.cover_id) }}" alt="">{% endif %}
+            <h3>{{ g.managed.title if g.managed else "比赛首页" }}</h3><p>{{ g.managed.summary if g.managed else "赛事文案随当前比赛更新。" }}</p>
+          </div>
+          <div class="arena-brand-sample"><strong>解题模式</strong><span class="arena-sample-action">提交 Flag</span></div>
+        </div>
+      </div>
+    {% endcall %}
+  </div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回账号管理",url_for('manage.accounts'),"link","back") }}</div>
+  {{ ui.heading(title) }}
+  {% call ui.panel("账号信息") %}
+    <form class="arena-form arena-form-narrow" method="post">
+      {{ ui.csrf() }}
+      {{ ui.field("登录账号","username",account.username if account else '',max=40) }}
+      {{ ui.field("显示名称","display_name",account.display_name if account else '',max=50) }}
+      {{ ui.field("新密码" if account else "密码","password",type='password',max=128,min=12,required=not account,placeholder="留空保留当前密码" if account else "至少 12 个字符") }}
+      {{ ui.select("账号权限","role",[('player','参赛'),('admin','赛事管理')],account.role if account else 'player') }}
+      <label class="arena-checkbox"><input type="checkbox" name="enabled" value="1"{% if not account or account.enabled %} checked{% endif %}>启用账号</label>
+      <div class="arena-actions"><button class="arena-btn primary" type="submit">保存账号</button>{{ ui.link("取消",url_for('manage.accounts')) }}</div>
+    </form>
+  {% endcall %}
+{% endblock %}

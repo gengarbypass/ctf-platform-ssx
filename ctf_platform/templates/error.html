@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {{ ui.heading("无法完成操作") }}
+  {% call ui.panel(code|string) %}
+    <div class="arena-detail-copy"><p>{{ message }}</p><div class="arena-actions">{{ ui.link("返回首页", url_for('site.home'), "", "back") }}</div></div>
+  {% endcall %}
+{% endblock %}

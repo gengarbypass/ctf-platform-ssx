@@ -1,0 +1,23 @@
+services:
+  platform:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${CTF_BIND_HOST:-0.0.0.0}:${CTF_PORT:-8000}:8000"
+    environment:
+      CTF_DATA_DIR: /data
+      CTF_ADMIN_USERNAME: ${CTF_ADMIN_USERNAME:-arenaops}
+      CTF_ADMIN_PASSWORD: ${CTF_ADMIN_PASSWORD:-}
+      CTF_SECRET_KEY: ${CTF_SECRET_KEY:-}
+      CTF_TIME_ZONE: ${CTF_TIME_ZONE:-Asia/Shanghai}
+      CTF_COOKIE_SECURE: ${CTF_COOKIE_SECURE:-0}
+      CTF_MAX_UPLOAD_MB: ${CTF_MAX_UPLOAD_MB:-16}
+      CTF_BOARD_POLL_SECONDS: ${CTF_BOARD_POLL_SECONDS:-4}
+      CTF_WEB_WORKERS: ${CTF_WEB_WORKERS:-2}
+      CTF_WEB_THREADS: ${CTF_WEB_THREADS:-4}
+    volumes:
+      - data:/data
+    stop_grace_period: 25s
+volumes:
+  data:

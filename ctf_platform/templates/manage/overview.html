@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("赛事总览", g.managed.title ~ " · " ~ contest_schedule(g.managed) if g.managed else "创建比赛后即可配置赛题、账号和队伍。") %}
+    {{ ui.link("比赛配置", url_for('manage.contests')) }}
+    {{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}
+  {% endcall %}
+  {% if g.managed %}
+    {% set state = contest_state(g.managed,g.now) %}
+    <div class="arena-kpis">
+      <div class="arena-panel arena-kpi"><span>参赛队伍</span><strong>{{ metrics.teams }}</strong></div>
+      <div class="arena-panel arena-kpi"><span>已发布赛题</span><strong>{{ metrics.puzzles + metrics.round_tasks }}</strong><small>解题 {{ metrics.puzzles }} · AWDP {{ metrics.round_tasks }}</small></div>
+      <div class="arena-panel arena-kpi"><span>补丁待评测 / 评测中</span><strong>{{ metrics.pending }}</strong></div>
+    </div>
+    {% call ui.panel("比赛进程") %}
+      <div class="arena-table-wrap"><table class="arena-table"><caption>比赛进程</caption>
+        <thead><tr><th scope="col">模式</th><th scope="col">状态</th><th scope="col">进度</th><th scope="col">入口</th></tr></thead>
+        <tbody>
+          <tr><td><strong>解题模式</strong></td><td>{{ ui.pill(state.label, 'success' if state.status == 'live' else 'neutral') }}</td><td>{{ metrics.puzzles }} 道赛题</td>
+            <td><div class="arena-actions">{{ ui.link("题库", url_for('manage.challenges', kind='puzzle'), "link") }}{% if g.managed.active %}{{ ui.link("计分板大屏", url_for('site.scoreboard', kind='puzzle', **{'from':'manage'}), "link", "screen") }}{% endif %}</div></td></tr>
+          <tr><td><strong>AWDP 模式</strong></td><td>{{ ui.pill(state.label, 'success' if state.status == 'live' else 'neutral') }}</td><td>第 {{ state.round }} / {{ state.rounds }} 回合</td>
+            <td><div class="arena-actions">{{ ui.link("队伍与服务", url_for('manage.teams'), "link") }}{% if g.managed.active %}{{ ui.link("计分板大屏", url_for('site.scoreboard', kind='round', **{'from':'manage'}), "link", "screen") }}{% endif %}</div></td></tr>
+        </tbody>
+      </table></div>
+    {% endcall %}
+    {% call ui.panel("近期补丁") %}{{ ui.patch_table(patches, true) }}{% endcall %}
+  {% else %}
+    {% call ui.panel("比赛配置") %}{{ ui.empty("当前还没有比赛。") }}{% endcall %}
+  {% endif %}
+{% endblock %}

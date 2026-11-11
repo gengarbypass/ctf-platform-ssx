@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回题库", url_for('site.puzzles', category=puzzle.category), "link", "back") }}</div>
+  {% call ui.heading(puzzle.title, puzzle.category ~ ' · ' ~ puzzle.difficulty ~ ' · ' ~ puzzle.points ~ ' 分') %}
+    {{ ui.pill("已解" if solved else "未解", "success" if solved else "neutral") }}
+  {% endcall %}
+  <div class="arena-two arena-split">
+    {% call ui.panel("题目详情") %}
+      <div class="arena-detail-copy">
+        <p class="arena-pre">{{ puzzle.description }}</p>
+        <dl class="arena-detail-data"><div><dt>分类</dt><dd>{{ puzzle.category }}</dd></div><div><dt>难度</dt><dd>{{ puzzle.difficulty }}</dd></div><div><dt>解出队伍</dt><dd>{{ solves }} 队</dd></div></dl>
+        {% if files %}
+        <section class="arena-attachments" aria-label="题目附件"><h3>附件</h3>
+          {% for file in files %}<div class="arena-attachment"><span class="arena-attachment-name">{{ ui.icon('file') }}<span class="arena-mono">{{ file.name }}</span></span>{{ ui.link("下载附件", url_for('site.download', file_id=file.id), "", "down") }}</div>{% endfor %}
+        </section>
+        {% endif %}
+      </div>
+    {% endcall %}
+    {% call ui.panel("提交 Flag") %}
+      {% if solved %}<div class="arena-detail-copy"><p>本队已解出本题。</p></div>
+      {% elif g.match.status != 'live' %}<div class="arena-detail-copy"><p>当前不在比赛提交时间内。</p></div>
+      {% elif not g.team %}<div class="arena-detail-copy"><p>加入当前比赛的队伍后即可提交。</p></div>
+      {% else %}
+      <form class="arena-form" action="{{ url_for('site.submit_flag', puzzle_id=puzzle.id) }}" method="post">
+        {{ ui.csrf() }}<label class="arena-field">Flag<input class="arena-input arena-mono" name="flag" type="text" placeholder="flag{…}" maxlength="256" spellcheck="false" autocomplete="off" required></label>
+        <div class="arena-actions"><button class="arena-btn primary" type="submit">提交 Flag</button></div>
+      </form>
+      {% endif %}
+    {% endcall %}
+  </div>
+  {% call ui.panel("本题提交记录") %}{{ ui.flag_table(history, false, false) }}{% endcall %}
+  {% if notice %}
+    {% set correct = notice.verdict == 'correct' %}
+    {% set label = "Flag 正确" if correct else "Flag 错误" if notice.verdict == 'incorrect' else "本题已解出" %}
+    {% set message = "本队获得 " ~ notice.points ~ " 分，积分已更新。" if correct else "答案未通过判定，请核对后重试。" if notice.verdict == 'incorrect' else "本队已经获得该题积分。" %}
+    <dialog class="arena-dialog" data-auto-dialog aria-labelledby="flag-result-title">
+      <header class="arena-dialog-head"><div><h2 id="flag-result-title">{{ label }}</h2><p>{{ puzzle.title }}</p></div><form method="dialog"><button class="arena-btn" type="submit" aria-label="关闭弹窗">×</button></form></header>
+      <div class="arena-dialog-body"><div class="arena-feedback arena-outcome {{ 'success' if correct else 'error' if notice.verdict == 'incorrect' else '' }}" role="status">{{ message }}</div>
+        <form class="arena-actions" method="dialog">
+          {% if correct %}{{ ui.link("查看排行榜", url_for('site.ranking'), "primary", "next") }}{% endif %}
+          <button type="submit" class="arena-btn {{ '' if correct else 'primary' }}" data-focus-flag>{{ "返回题目" if correct else "重试" }}</button>
+        </form>
+      </div>
+    </dialog>
+    <noscript><div class="arena-feedback {{ 'success' if correct else 'error' }}">{{ label }}。{{ message }}</div></noscript>
+  {% endif %}
+{% endblock %}

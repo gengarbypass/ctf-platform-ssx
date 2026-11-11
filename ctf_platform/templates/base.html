@@ -1,0 +1,59 @@
+{% import "macros.html" as ui with context %}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} · {{ g.brand.name if g.brand else '蓝域 CTF' }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='arena.css') }}">
+  {% if g.brand and g.brand.logo_id %}<link rel="icon" href="{{ url_for('site.image', file_id=g.brand.logo_id) }}">{% endif %}
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+<div id="lanyu-arena"{% if g.brand %} style="--arena-blue:{{ g.brand.accent }};--arena-bg:{{ g.brand.background }};--arena-paper:{{ g.brand.surface }};--arena-radius:{{ g.brand.radius }}px"{% endif %}>
+  {% block shell %}
+  {% set admin = g.user and g.user.role == 'admin' %}
+  <header class="arena-top">
+    <a class="arena-brand" href="{{ url_for('manage.overview' if admin else 'site.home') }}">
+      {{ ui.mark(g.brand) }}<span data-brand-name>{{ g.brand.name }}</span>
+    </a>
+    <div class="arena-topbar">
+      <div class="arena-crumb" aria-label="当前位置"><strong>{{ title }}</strong></div>
+      {% if g.user %}<form action="{{ url_for('site.logout') }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">{{ ui.icon('logout') }}退出登录</button></form>{% endif %}
+    </div>
+  </header>
+  <div class="arena-frame{% if not g.user %} standalone{% endif %}">
+    {% if g.user %}
+    <aside class="arena-side">
+      <div class="arena-side-label">{{ '工作台' if admin else '比赛' }}</div>
+      <nav class="arena-nav" aria-label="页面导航">
+        {% if admin %}
+          {% set items = [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题目管理','manage.challenges','/manage/challenges','list'),('队伍与服务','manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
+        {% else %}
+          {% set items = [('比赛首页','site.home','/','home'),('解题模式','site.puzzles','/challenges','flag'),('AWDP 模式','site.awdp','/awdp','shield'),('排行榜','site.ranking','/rankings','ranking'),('我的提交','site.records','/submissions','history')] %}
+        {% endif %}
+        {% for label, endpoint, path, glyph in items %}
+          {% set destination = url_for(endpoint, kind='puzzle') if endpoint == 'manage.challenges' else url_for(endpoint) %}
+          {% set active = request.path == path if path in ['/', '/manage/'] else request.path.startswith(path) or (endpoint == 'manage.submissions' and request.path.startswith('/manage/patches')) %}
+          <a href="{{ destination }}"{% if active %} aria-current="page"{% endif %}>{{ ui.icon(glyph) }}{{ label }}</a>
+        {% endfor %}
+      </nav>
+      {% if admin and g.managed %}
+      <a class="arena-scope" href="{{ url_for('manage.contests') }}"><small>当前编辑</small><strong>{{ g.managed.title }}</strong></a>
+      {% endif %}
+      <div class="arena-profile"><span class="arena-avatar" aria-hidden="true">{{ (g.team.name if g.team else g.user.display_name)[:2]|upper }}</span><div><strong>{{ g.team.name if g.team else g.user.display_name }}</strong>{% if g.team %}<small>{{ g.user.display_name }}</small>{% endif %}</div></div>
+    </aside>
+    {% endif %}
+    <main class="arena-main" id="main">
+      {% for category, message in get_flashed_messages(with_categories=true) %}
+        <div class="arena-feedback {{ category }}" role="status">{{ message }}</div>
+      {% endfor %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% endblock %}
+</div>
+<script src="{{ url_for('static', filename='site.js') }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

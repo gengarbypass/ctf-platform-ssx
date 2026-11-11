@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("比赛配置", "比赛标题、简介、赛程与背景图会同步显示在登录页和比赛首页。") %}
+    {{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}
+  {% endcall %}
+  {% call ui.panel("比赛列表") %}
+    {% if rows %}
+      <div class="arena-table-wrap"><table class="arena-table"><caption>比赛列表</caption>
+        <thead><tr><th scope="col">比赛</th><th scope="col">赛程</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <tbody>{% for row in rows %}{% set state = contest_state(row,g.now) %}<tr>
+          <td><strong>{{ row.title }}</strong>{% if row.summary %}<br><small class="arena-muted">{{ row.summary }}</small>{% endif %}</td>
+          <td class="arena-mono">{{ contest_schedule(row) }}</td>
+          <td>{{ ui.pill("当前开启" if row.active else "未开启", "success" if row.active else "neutral") }}<br><small>{{ state.label }}</small></td>
+          <td><div class="arena-actions">
+            {{ ui.link("编辑", url_for('manage.contest_edit', contest_id=row.id), "link") }}
+            <form action="{{ url_for('manage.select_contest', contest_id=row.id) }}" method="post">{{ ui.csrf() }}<button class="arena-link" type="submit">管理内容</button></form>
+            {% if row.active %}
+            <form action="{{ url_for('manage.deactivate_contest', contest_id=row.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">撤下</button></form>
+            {% else %}
+            <form action="{{ url_for('manage.activate_contest', contest_id=row.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn primary" type="submit">开启比赛</button></form>
+            {% endif %}
+          </div></td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}{{ ui.empty("当前还没有比赛。") }}{% endif %}
+  {% endcall %}
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回题目管理",url_for('manage.challenges',kind=kind),"link","back") }}</div>
+  {{ ui.heading(title, g.managed.title) }}
+  {% call ui.panel("赛题信息") %}
+    <form class="arena-form arena-form-narrow" method="post" enctype="multipart/form-data">
+      {{ ui.csrf(true) }}
+      {{ ui.field("题目名称","title",task.title if task else '',max=100) }}
+      {% if kind == 'puzzle' %}
+        <div class="arena-two">
+          <label class="arena-field">分类<select class="arena-input" name="category">{% for category in categories %}<option{% if task and task.category == category %} selected{% endif %}>{{ category }}</option>{% endfor %}</select></label>
+          <label class="arena-field">难度<select class="arena-input" name="difficulty">{% for difficulty in difficulties %}<option{% if task and task.difficulty == difficulty %} selected{% endif %}>{{ difficulty }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="arena-two">
+          {{ ui.field("分值","points",task.points if task else 100,type='number',min=1,maximum=100000) }}
+          {{ ui.field("Flag","flag",type='password',max=256,required=not task,placeholder="留空保留当前 Flag" if task else "输入正确答案") }}
+        </div>
+      {% else %}{{ ui.field("基线版本","baseline",task.baseline if task else '',max=80) }}{% endif %}
+      {{ ui.description("题目说明","description",task.description if task else '',rows=6,max=16000,required=true) }}
+      {% if kind == 'puzzle' %}
+        <label class="arena-field">题目附件<input class="arena-input" type="file" name="attachments" multiple><small>发布后，附件下载链接会出现在题目详情。</small></label>
+        {% for file in files %}
+          <div class="arena-attachment">{{ ui.link(file.name,url_for('site.download',file_id=file.id),"link","file") }}<label class="arena-checkbox"><input type="checkbox" name="remove_file" value="{{ file.id }}">移除</label></div>
+        {% endfor %}
+      {% endif %}
+      <label class="arena-checkbox"><input type="checkbox" name="published" value="1"{% if task and task.published %} checked{% endif %}>发布赛题</label>
+      <div class="arena-actions"><button class="arena-btn primary" type="submit">保存赛题</button>{{ ui.link("取消",url_for('manage.challenges',kind=kind)) }}</div>
+    </form>
+  {% endcall %}
+{% endblock %}

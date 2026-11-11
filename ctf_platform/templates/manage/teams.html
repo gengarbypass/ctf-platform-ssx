@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("队伍与服务", g.managed.title if g.managed else "创建比赛后即可管理队伍。") %}
+    {% if g.managed %}{{ ui.link("创建队伍", url_for('manage.team_edit'), "primary", "plus") }}{% else %}{{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}{% endif %}
+  {% endcall %}
+  {% if g.managed %}
+    {% call ui.panel("参赛队伍") %}
+      {% if rows %}
+      <div class="arena-table-wrap"><table class="arena-table"><caption>参赛队伍</caption>
+        <thead><tr><th scope="col">队伍</th><th scope="col">账号数量</th><th scope="col">操作</th></tr></thead>
+        <tbody>{% for row in rows %}<tr><td><strong>{{ row.name }}</strong></td><td>{{ row.members }}</td><td>{{ ui.link("编辑",url_for('manage.team_edit',team_id=row.id),"link") }}</td></tr>{% endfor %}</tbody>
+      </table></div>
+      {% else %}{{ ui.empty("暂无参赛队伍。") }}{% endif %}
+    {% endcall %}
+    {% call ui.panel("参赛账号分队") %}
+      {% if players %}
+      <div class="arena-table-wrap"><table class="arena-table"><caption>参赛账号分队</caption>
+        <thead><tr><th scope="col">账号</th><th scope="col">当前队伍</th><th scope="col">分配队伍</th></tr></thead>
+        <tbody>{% for player in players %}<tr><td><strong>{{ player.display_name }}</strong><br><small class="arena-mono">{{ player.username }}</small></td><td>{{ player.team_name or '未分配' }}</td>
+        <td><form class="arena-actions" action="{{ url_for('manage.membership') }}" method="post">{{ ui.csrf(true) }}
+          <input type="hidden" name="user_id" value="{{ player.id }}"><select class="arena-input" name="team_id" aria-label="{{ player.display_name }}的队伍"><option value="">未分配</option>{% for team in rows %}<option value="{{ team.id }}"{% if player.team_id == team.id %} selected{% endif %}>{{ team.name }}</option>{% endfor %}</select>
+          <button type="submit" class="arena-btn">保存分队</button>
+        </form></td></tr>{% endfor %}</tbody>
+      </table></div>
+      {% else %}<div class="arena-detail-copy"><p>还没有参赛账号。</p>{{ ui.link("创建账号",url_for('manage.account_edit'),"link","next") }}</div>{% endif %}
+    {% endcall %}
+    {% call ui.panel("服务状态") %}{{ ui.service_table(matrix) }}{% endcall %}
+    {% set match = contest_state(g.managed,g.now) %}
+    <div class="arena-two">
+      {% call ui.panel("更新服务状态") %}
+        {% if rows and matrix.tasks %}
+        <form class="arena-form" action="{{ url_for('manage.update_status') }}" method="post">
+          {{ ui.csrf(true) }}
+          <label class="arena-field">队伍<select class="arena-input" name="team_id" required>{% for team in rows %}<option value="{{ team.id }}">{{ team.name }}</option>{% endfor %}</select></label>
+          <label class="arena-field">服务<select class="arena-input" name="task_id" required>{% for task in matrix.tasks %}<option value="{{ task.id }}">{{ task.title }}</option>{% endfor %}</select></label>
+          {{ ui.select("服务状态","status",service_states.items()) }}
+          <div class="arena-actions"><button class="arena-btn primary" type="submit">更新状态</button></div>
+        </form>
+        {% else %}{{ ui.empty("创建队伍和攻防赛题后即可录入。") }}{% endif %}
+      {% endcall %}
+      {% call ui.panel("录入得分变化") %}
+        {% if rows and match.round %}
+        <form class="arena-form" action="{{ url_for('manage.record_score') }}" method="post">
+          {{ ui.csrf(true) }}
+          <label class="arena-field">队伍<select class="arena-input" name="team_id" required>{% for team in rows %}<option value="{{ team.id }}">{{ team.name }}</option>{% endfor %}</select></label>
+          <div class="arena-two">{{ ui.select("计分项目","kind",score_kinds.items()) }}{{ ui.field("回合","round_no",match.round,type='number',min=1,maximum=match.round) }}</div>
+          {{ ui.field("分数变化","delta",type='number',min=-100000,maximum=100000,placeholder="正数加分，负数扣分") }}
+          {{ ui.description("计分说明","reason",rows=2,max=500,required=true) }}
+          <div class="arena-actions"><button class="arena-btn primary" type="submit">保存计分</button></div>
+        </form>
+        {% else %}{{ ui.empty("创建队伍并开赛后即可计分。") }}{% endif %}
+      {% endcall %}
+    </div>
+    {% call ui.panel("近期计分流水") %}{{ ui.score_table(events,true) }}{% endcall %}
+  {% endif %}
+{% endblock %}
