@@ -63,7 +63,7 @@
     --entry-card-width: min(100%, 390px, 30vw);
     --entry-top-padding: clamp(70px, 13vh, 140px);
     display: grid; grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(min-content, 1fr) auto minmax(min-content, 1fr);
+    grid-template-rows: minmax(min-content, 1fr) auto minmax(0, 1fr);
     justify-items: center; gap: clamp(10px, 1.7vh, 18px);
     width: 100%; padding-inline: clamp(16px, 4vw, 64px);
     padding-block: var(--entry-top-padding) clamp(8px, 1.35vh, 16px);
@@ -81,14 +81,6 @@
   }
   #lanyu-arena .arena-entry-slogan span { display: block; text-align: left; }
   #lanyu-arena .arena-entry-slogan span + span { text-align: right; }
-  #lanyu-arena .arena-entry-event {
-    grid-area: 3 / 1; align-self: start; display: grid; gap: 4px; width: fit-content; max-width: var(--entry-card-width); padding: 11px 15px;
-    border: 1px solid #a9d0ff38; border-radius: var(--arena-radius); background: #061a34c2; color: #deebff;
-  }
-  #lanyu-arena .arena-entry-event strong { color: #fff; overflow-wrap: anywhere; }
-  #lanyu-arena .arena-entry-event p { font-size: 12px; overflow-wrap: anywhere; }
-  #lanyu-arena .arena-entry-event [data-event-summary] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-  #lanyu-arena .arena-entry-event [data-event-summary]:empty { display: none; }
   #lanyu-arena .arena-entry-form {
     grid-area: 2 / 1; display: grid; gap: clamp(9px, 1.4vh, 14px); min-width: 0; width: var(--entry-card-width);
     padding: clamp(16px, 2.4vh, 24px) clamp(23px, 3.2vw, 39px);

@@ -28,27 +28,6 @@ for (const dialog of document.querySelectorAll("[data-auto-dialog]")) {
   dialog.addEventListener("close", () => document.querySelector('input[name="flag"]')?.focus());
 }
 
-const login = document.querySelector("[data-login-presentation]");
-if (login) {
-  const eventCard = login.querySelector("[data-login-event]");
-  async function updatePresentation() {
-    try {
-      const response = await fetch(login.dataset.loginPresentation, { cache: "no-store", signal: AbortSignal.timeout(6500) });
-      if (!response.ok) return;
-      const event = await response.json();
-      for (const field of ["title", "summary", "status", "schedule"]) {
-        eventCard.querySelector("[data-event-" + field + "]").textContent = event[field];
-      }
-      eventCard.hidden = !event.schedule;
-    } catch {
-      // Leave the last successful presentation visible during temporary disconnections.
-    } finally {
-      setTimeout(updatePresentation, 8000);
-    }
-  }
-  setTimeout(updatePresentation, 8000);
-}
-
 for (const form of document.querySelectorAll("[data-image-form]")) {
   const editor = form.closest("[data-brand-editor]");
   const preview = (editor || form).querySelector("[data-image-preview]");

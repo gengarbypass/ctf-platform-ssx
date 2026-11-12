@@ -99,11 +99,11 @@ class PlatformTest(unittest.TestCase):
                   baseline="v1.0", description="记录服务状态与加固说明。", published="1")
         return self.lookup("SELECT id FROM round_tasks WHERE contest_id = ?", (contest_id,))[0][0]
 
-    def test_login_uses_one_cover_and_updates_contest_text(self):
+    def test_login_stays_the_same_when_active_contest_changes(self):
         public = self.app.test_client()
         self.assertEqual(public.get("/healthz").json, {"status": "ok"})
         login = public.get("/login").get_data(as_text=True)
-        cover = public.get("/api/login-presentation").json["cover"]
+        cover = "/static/login-campus.webp"
         with public.get(cover) as image:
             self.assertEqual(image.mimetype, "image/webp")
         self.assertIn(f'src="{cover}"', login)
@@ -113,20 +113,19 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(public.get("/puzzle").location, "/login")
         self.assertEqual(public.get("/awdp").location, "/login")
         first = self.contest(cover=True)
-        before = public.get("/api/login-presentation").json
-        self.assertIn("测试赛", before["title"])
-        self.assertEqual(before["cover"], cover)
         first_image = self.lookup("SELECT cover_id FROM contests WHERE id = ?", (first,))[0][0]
         player, _ = self.player(first, "coverqa", "Cover QA")
-        self.assertIn(f'src="/images/{first_image}"', player.get("/").get_data(as_text=True))
-        self.assertNotIn(f'src="/images/{first_image}"', public.get("/login").get_data(as_text=True))
+        home = player.get("/").get_data(as_text=True)
+        self.assertIn("蓝域杯 · 测试赛", home)
+        self.assertIn("赛题与回合赛况", home)
+        self.assertIn(f'src="/images/{first_image}"', home)
+        self.assertEqual(public.get("/login").get_data(as_text=True), login)
         self.contest("蓝域杯 · 总决赛", mode="round", cover=True)
-        after = public.get("/api/login-presentation").json
-        self.assertIn("总决赛", after["title"])
-        self.assertEqual(after["cover"], cover)
         self.assertEqual(public.get(f"/images/{first_image}").status_code, 404)
         self.assertEqual(self.admin.post(f"/manage/contests/{first}/activate").status_code, 400)
-        self.assertEqual(public.get("/api/login-presentation").json["title"], after["title"])
+        self.assertIn("蓝域杯 · 总决赛", player.get("/").get_data(as_text=True))
+        self.assertEqual(public.get("/login").get_data(as_text=True), login)
+        self.assertEqual(public.get("/api/login-presentation").status_code, 404)
 
     def test_health_reports_the_deployed_commit(self):
         self.app.config["BUILD_REVISION"] = "a" * 40

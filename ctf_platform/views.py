@@ -80,18 +80,6 @@ def logout():
     return redirect(url_for("site.login"))
 
 
-@site.get("/api/login-presentation")
-def login_presentation():
-    contest = g.contest
-    return jsonify(
-        title=contest["title"] if contest else g.brand["name"],
-        summary=contest["summary"] if contest else "比赛开启后，赛程和赛题将在这里展示。",
-        schedule=f"{contest_schedule(contest)} · {current_app.config['TIME_ZONE'].key}" if contest else "",
-        cover=url_for("static", filename=LOGIN_BACKGROUND),
-        status=g.match["label"] if g.match else "等待开赛",
-    )
-
-
 @site.get("/")
 @login_required
 def home():
