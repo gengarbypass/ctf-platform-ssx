@@ -11,9 +11,17 @@
         <input type="hidden" name="mode" value="{{ mode }}">
         <div class="arena-field">比赛模式 <span>{{ ui.pill(contest_modes[mode]) }}</span><small>撤下比赛后可修改模式。</small></div>
       {% else %}
-        {% set modes = contest_modes.items()|list %}
-        {% if not contest %}{% set modes = [('', '请选择比赛模式')] + modes %}{% endif %}
-        {{ ui.select("比赛模式", "mode", modes, mode) }}
+        <fieldset class="arena-field arena-mode-choice">
+          <legend>比赛模式</legend>
+          <div class="arena-actions">
+            {% for value, label in contest_modes.items() %}
+              <label class="arena-btn">
+                <input type="radio" name="mode" value="{{ value }}" required{% if mode == value %} checked{% endif %}>
+                {{ label }}
+              </label>
+            {% endfor %}
+          </div>
+        </fieldset>
       {% endif %}
       {{ ui.field("比赛标题","title",contest.title if contest else '',max=80) }}
       {{ ui.description("比赛简介","summary",contest.summary if contest else '',rows=3,max=1000) }}

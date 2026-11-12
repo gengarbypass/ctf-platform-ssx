@@ -21,7 +21,7 @@
             {% else %}
             <form action="{{ url_for('manage.activate_contest', contest_id=row.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn primary" type="submit">开启比赛</button></form>
             {% endif %}
-            {{ ui.link("删除", url_for('manage.contest_delete', contest_id=row.id), "link") }}
+            {{ ui.link("删除比赛", url_for('manage.contest_delete', contest_id=row.id), "danger-outline") }}
           </div></td>
         </tr>{% endfor %}</tbody>
       </table></div>

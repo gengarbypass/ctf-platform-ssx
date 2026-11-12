@@ -1,5 +1,6 @@
 import hmac
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -35,6 +36,7 @@ def create_app(overrides=None):
     upload_mb = _setting_int("CTF_MAX_UPLOAD_MB", 16, 1, 128)
     app.config.from_mapping(
         DATA_DIR=os.environ.get("CTF_DATA_DIR", "data"),
+        BUILD_REVISION=os.environ.get("CTF_BUILD_REVISION", ""),
         ADMIN_USERNAME=os.environ.get("CTF_ADMIN_USERNAME", "arenaops"),
         ADMIN_PASSWORD=os.environ.get("CTF_ADMIN_PASSWORD", ""),
         SECRET_KEY=os.environ.get("CTF_SECRET_KEY") or None,
@@ -133,7 +135,11 @@ def create_app(overrides=None):
             ready = get_db().execute("SELECT 1 FROM site_settings WHERE id = 1").fetchone()
         except sqlite3.Error:
             ready = False
-        return jsonify(status="ok" if ready else "unavailable"), 200 if ready else 503
+        result = {"status": "ok" if ready else "unavailable"}
+        revision = app.config["BUILD_REVISION"]
+        if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", revision):
+            result["revision"] = revision
+        return jsonify(result), 200 if ready else 503
 
     @app.errorhandler(FormError)
     def form_error(error):

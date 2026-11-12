@@ -11,7 +11,10 @@
         <td><div class="arena-actions">
           {{ ui.link("编辑", url_for('manage.account_edit', user_id=row.id), "link") }}
           {% if row.role != 'admin' or not row.enabled or enabled_admins > 1 %}
-            {{ ui.link("删除", url_for('manage.account_delete', user_id=row.id), "link") }}
+            {{ ui.link("删除账号", url_for('manage.account_delete', user_id=row.id), "danger-outline") }}
+          {% else %}
+            <button class="arena-btn" type="button" disabled aria-describedby="delete-account-note-{{ row.id }}">删除账号</button>
+            <small class="arena-muted" id="delete-account-note-{{ row.id }}">需保留一个启用的管理员</small>
           {% endif %}
         </div></td>
       </tr>{% endfor %}</tbody>

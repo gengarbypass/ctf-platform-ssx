@@ -37,7 +37,7 @@ class PlatformTest(unittest.TestCase):
         self.password = secrets.token_urlsafe(18)
         self.settings = {
             "TESTING": True, "DATA_DIR": self.directory.name, "ADMIN_USERNAME": "arenaops",
-            "ADMIN_PASSWORD": self.password, "SECRET_KEY": None, "SESSION_COOKIE_SECURE": False,
+            "ADMIN_PASSWORD": self.password, "SECRET_KEY": None, "SESSION_COOKIE_SECURE": False, "BUILD_REVISION": "",
         }
         self.app = create_app(self.settings)
         self.admin = self.login("arenaops")
@@ -120,6 +120,11 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(public.get("/api/login-presentation?mode=puzzle").json["cover"], "")
         self.assertEqual(self.admin.post(f"/manage/contests/{first}/activate").status_code, 400)
         self.assertEqual(public.get("/api/login-presentation").json["title"], after["title"])
+
+    def test_health_reports_the_deployed_commit(self):
+        self.app.config["BUILD_REVISION"] = "a" * 40
+        response = self.app.test_client().get("/healthz")
+        self.assertEqual(response.json, {"status": "ok", "revision": "a" * 40})
 
     def test_flag_judgement_download_and_concurrent_one_time_award(self):
         contest_id = self.contest()
@@ -322,7 +327,8 @@ class PlatformTest(unittest.TestCase):
 
     def test_contest_mode_controls_round_duration(self):
         form = self.admin.get("/manage/contests/new").get_data(as_text=True)
-        self.assertIn('<option value="" selected>请选择比赛模式</option>', form)
+        for mode in ("puzzle", "round"):
+            self.assertIn(f'<input type="radio" name="mode" value="{mode}" required>', form)
         self.assertIn("<div data-round-duration hidden>", form)
         self.assertRegex(form, r'name="round_minutes"[^>]+\bdisabled\b')
         now = datetime.now(self.app.config["TIME_ZONE"])
@@ -406,6 +412,7 @@ class PlatformTest(unittest.TestCase):
 
         admin_id = self.lookup("SELECT id FROM users WHERE role = 'admin'")[0][0]
         admin_route = f"/manage/accounts/{admin_id}/delete"
+        self.assertIn("需保留一个启用的管理员", self.admin.get("/manage/accounts").get_data(as_text=True))
         self.post(self.admin, admin_route, code=400)
         self.post(self.admin, "/manage/accounts/new", username="newops", display_name="New Ops",
                   password=self.password, role="admin", enabled="1")

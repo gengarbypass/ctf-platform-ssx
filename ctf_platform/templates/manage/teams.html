@@ -13,7 +13,7 @@
           <td><strong>{{ row.name }}</strong></td><td>{{ row.members }}</td>
           <td><div class="arena-actions">
             {{ ui.link("编辑",url_for('manage.team_edit',team_id=row.id),"link") }}
-            {{ ui.link("删除",url_for('manage.team_delete',team_id=row.id),"link") }}
+            {{ ui.link("删除队伍",url_for('manage.team_delete',team_id=row.id),"danger-outline") }}
           </div></td>
         </tr>{% endfor %}</tbody>
       </table></div>

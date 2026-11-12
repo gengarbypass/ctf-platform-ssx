@@ -101,6 +101,8 @@
   #lanyu-arena .arena-btn.primary:hover { background: var(--arena-blue-ink); }
   #lanyu-arena .arena-btn.danger { background: #b42318; color: white; border-color: transparent; }
   #lanyu-arena .arena-btn.danger:hover { background: #912018; }
+  #lanyu-arena .arena-btn.danger-outline { color: #a61e15; border-color: #efc5bf; }
+  #lanyu-arena .arena-btn.danger-outline:hover { background: #fff4f2; border-color: #a61e15; }
   #lanyu-arena .arena-btn .arena-icon, #lanyu-arena .arena-link .arena-icon { width: 15px; height: 15px; }
   #lanyu-arena .arena-link { display: inline-flex; align-items: center; gap: 4px; color: var(--arena-blue-ink); background: transparent; border: 0; padding: 2px 0; font-size: 12px; font-weight: 670; white-space: nowrap; }
   #lanyu-arena .arena-link:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -178,6 +180,10 @@
   #lanyu-arena .arena-attachment .arena-btn { min-height: 30px; padding: 3px 6px; }
   #lanyu-arena .arena-attachment-preview { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 11px; border-radius: 8px; border: 1px solid var(--arena-border); background: var(--arena-bg); color: var(--arena-ink); }
   #lanyu-arena .arena-field { display: grid; gap: 5px; min-width: 0; color: var(--arena-ink); font-size: 12px; font-weight: 650; }
+  #lanyu-arena .arena-mode-choice { border: 0; margin: 0; padding: 0; }
+  #lanyu-arena .arena-mode-choice legend { padding: 0; margin-bottom: 6px; }
+  #lanyu-arena .arena-mode-choice input { accent-color: var(--arena-blue); }
+  #lanyu-arena .arena-mode-choice .arena-btn:has(input:checked) { color: var(--arena-blue-ink); background: var(--arena-soft); border-color: var(--arena-blue); }
   #lanyu-arena .arena-field small { color: var(--arena-muted); font-weight: 400; font-size: 11px; }
   #lanyu-arena .arena-input { display: block; max-width: 100%; min-width: 0; width: 100%; min-height: 36px; padding: 6px 9px; border: 1px solid #cdd9ea; border-radius: min(var(--arena-radius), 8px); background: var(--arena-paper); color: var(--arena-ink); font-size: 13px; }
   #lanyu-arena select.arena-input { width: auto; padding-right: 23px; }

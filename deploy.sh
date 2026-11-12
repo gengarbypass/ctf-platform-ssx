@@ -133,6 +133,12 @@ printf 'CTF_BIND_HOST=0.0.0.0\nCTF_PORT=%s\nCTF_COOKIE_SECURE=0\n' "$port" > "$e
 compose+=(--env-file "$ecs_tmp")
 export CTF_BIND_HOST=0.0.0.0 CTF_PORT="$port" CTF_COOKIE_SECURE=0
 
+revision=""
+if [[ -e "$root/.git" ]] && command -v git >/dev/null 2>&1; then
+    revision=$(git -c "safe.directory=$root" -C "$root" rev-parse --verify HEAD 2>/dev/null | tr -d '\r') || revision=""
+fi
+export CTF_BUILD_REVISION="$revision"
+
 "${compose[@]}" config --quiet
 if ! "${compose[@]}" up -d --build; then
     fail "部署未启动。若基础镜像拉取失败，请在 .env 配置可达的 CTF_PYTHON_IMAGE 后重试。"
@@ -140,10 +146,13 @@ fi
 
 probe() {
     if command -v curl >/dev/null 2>&1; then
-        curl --noproxy '*' -fsS --max-time 3 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1
+        local response
+        response=$(curl --noproxy '*' -fsS --max-time 3 "http://127.0.0.1:$port/healthz" 2>/dev/null) || return 1
+        [[ -z $revision ]] || grep -Eq "\"revision\"[[:space:]]*:[[:space:]]*\"$revision\"" <<< "$response"
     else
         "${compose[@]}" exec -T platform python -c \
-            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).close()" >/dev/null 2>&1
+            'import json, sys, urllib.request; response = urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=3); sys.exit(bool(sys.argv[1]) and json.load(response).get("revision") != sys.argv[1])' \
+            "$revision" >/dev/null 2>&1
     fi
 }
 
@@ -151,7 +160,7 @@ deadline=$((SECONDS + 60))
 until probe; do
     if (( SECONDS >= deadline )); then
         "${compose[@]}" logs --tail 30 platform >&2
-        fail "平台健康检查未通过。"
+        fail "平台健康检查未通过，或服务版本与当前源码提交不一致。"
     fi
     sleep 1
 done
@@ -192,4 +201,7 @@ if ! valid_ipv4 "$public_ip"; then
     public_ip=$(ecs_public_ip) || public_ip="ECS公网IP"
 fi
 printf '部署完成，公网入口 http://%s:%s\n' "$public_ip" "$port"
+if [[ -n $revision ]]; then
+    printf '运行版本 %s，可在 /healthz 核对。\n' "$revision"
+fi
 printf '在 ECS 安全组入方向允许 TCP %s，然后从实例外访问。\n' "$port"

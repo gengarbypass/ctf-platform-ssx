@@ -90,7 +90,9 @@ if (roundDuration) {
     minutes.disabled = !isRound;
     minutes.required = isRound;
   }
-  mode.addEventListener("change", updateRoundDuration);
+  for (const choice of contestForm.querySelectorAll('input[name="mode"]')) {
+    choice.addEventListener("change", updateRoundDuration);
+  }
   updateRoundDuration();
 }
 

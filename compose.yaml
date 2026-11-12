@@ -5,6 +5,7 @@ services:
       args:
         CTF_PYTHON_IMAGE: "${CTF_PYTHON_IMAGE:-python:3.13-slim-bookworm}"
         CTF_PIP_INDEX_URL: "${CTF_PIP_INDEX_URL:-https://pypi.org/simple}"
+        CTF_BUILD_REVISION: "${CTF_BUILD_REVISION:-}"
     init: true
     restart: unless-stopped
     ports:
