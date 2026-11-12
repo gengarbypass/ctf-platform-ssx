@@ -16,7 +16,7 @@ from .storage import read_upload, save_upload, serve_upload
 
 site = Blueprint("site", __name__)
 PAGE_SIZE = 30
-LOGIN_BACKGROUND = "login-frontier.webp"
+LOGIN_BACKGROUND = "login-campus.webp"
 
 
 def page_number():

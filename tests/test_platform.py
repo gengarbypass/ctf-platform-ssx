@@ -107,7 +107,7 @@ class PlatformTest(unittest.TestCase):
         with public.get(cover) as image:
             self.assertEqual(image.mimetype, "image/webp")
         self.assertIn(f'src="{cover}"', login)
-        self.assertIn("筑牢边疆数字防线、<br>锻造基层网安尖兵", login)
+        self.assertRegex(login, r"<span>筑牢边疆数字防线</span>\s*<span>锻造基层网安尖兵</span>")
         self.assertNotIn('href="/puzzle"', login)
         self.assertNotIn('href="/awdp"', login)
         self.assertEqual(public.get("/puzzle").location, "/login")

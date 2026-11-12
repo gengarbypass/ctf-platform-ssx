@@ -2,11 +2,13 @@
 {% import "macros.html" as ui with context %}
 {% block shell %}
 <div class="arena-entry" data-login-presentation="{{ url_for('site.login_presentation') }}">
-  <img class="arena-entry-image" src="{{ login_background }}" width="1672" height="941" alt="" fetchpriority="high">
-  <header class="arena-entry-header">{{ ui.mark(g.brand) }}<span data-brand-name>{{ g.brand.name }}</span></header>
+  <img class="arena-entry-image" src="{{ login_background }}" width="4096" height="2304" alt="塔里木大学与网络安全学院" fetchpriority="high">
   <main class="arena-entry-main">
     <section class="arena-entry-intro" aria-labelledby="arena-entry-slogan">
-      <h1 id="arena-entry-slogan">筑牢边疆数字防线、<br>锻造基层网安尖兵</h1>
+      <h1 id="arena-entry-slogan">
+        <span>筑牢边疆数字防线</span>
+        <span>锻造基层网安尖兵</span>
+      </h1>
       <div class="arena-entry-event" data-login-event{% if not g.contest %} hidden{% endif %}>
         <div class="arena-actions">
           <strong data-event-title>{{ g.contest.title if g.contest else '' }}</strong>
@@ -18,7 +20,10 @@
     </section>
     <form class="arena-entry-form" action="{{ url_for('site.login') }}" method="post" aria-labelledby="arena-login-title">
       {{ ui.csrf() }}
-      <header><h2 id="arena-login-title">{{ title }}</h2></header>
+      <header>
+        <div class="arena-entry-brand">{{ ui.mark(g.brand) }}<span data-brand-name>{{ g.brand.name }}</span></div>
+        <h2 id="arena-login-title">{{ title }}</h2>
+      </header>
       <label class="arena-field">账号<input class="arena-input" name="username" type="text" value="{{ username|default('') }}" placeholder="输入账号" autocomplete="username" spellcheck="false" maxlength="40" required></label>
       <label class="arena-field">密码<input class="arena-input" name="password" type="password" placeholder="输入密码" autocomplete="current-password" maxlength="128" required></label>
       {% if error %}<div class="arena-feedback error" role="alert">{{ error }}</div>{% endif %}
