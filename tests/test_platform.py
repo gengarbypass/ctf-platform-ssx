@@ -99,25 +99,32 @@ class PlatformTest(unittest.TestCase):
                   baseline="v1.0", description="记录服务状态与加固说明。", published="1")
         return self.lookup("SELECT id FROM round_tasks WHERE contest_id = ?", (contest_id,))[0][0]
 
-    def test_login_presentation_follows_active_contest(self):
+    def test_login_uses_one_cover_and_updates_contest_text(self):
         public = self.app.test_client()
         self.assertEqual(public.get("/healthz").json, {"status": "ok"})
-        self.assertEqual(public.get("/api/login-presentation").json["cover"], "")
-        self.assertEqual(public.get("/puzzle").location, "/login?mode=puzzle")
-        self.assertEqual(public.get("/awdp").location, "/login?mode=round")
+        login = public.get("/login").get_data(as_text=True)
+        cover = public.get("/api/login-presentation").json["cover"]
+        with public.get(cover) as image:
+            self.assertEqual(image.mimetype, "image/webp")
+        self.assertIn(f'src="{cover}"', login)
+        self.assertIn("筑牢边疆数字防线、<br>锻造基层网安尖兵", login)
+        self.assertNotIn('href="/puzzle"', login)
+        self.assertNotIn('href="/awdp"', login)
+        self.assertEqual(public.get("/puzzle").location, "/login")
+        self.assertEqual(public.get("/awdp").location, "/login")
         first = self.contest(cover=True)
         before = public.get("/api/login-presentation").json
         self.assertIn("测试赛", before["title"])
-        self.assertEqual(public.get(before["cover"]).mimetype, "image/png")
-        self.assertEqual(public.get("/api/login-presentation?mode=puzzle").json, before)
-        self.assertEqual(public.get("/api/login-presentation?mode=round").json["cover"], "")
+        self.assertEqual(before["cover"], cover)
+        first_image = self.lookup("SELECT cover_id FROM contests WHERE id = ?", (first,))[0][0]
+        player, _ = self.player(first, "coverqa", "Cover QA")
+        self.assertIn(f'src="/images/{first_image}"', player.get("/").get_data(as_text=True))
+        self.assertNotIn(f'src="/images/{first_image}"', public.get("/login").get_data(as_text=True))
         self.contest("蓝域杯 · 总决赛", mode="round", cover=True)
         after = public.get("/api/login-presentation").json
         self.assertIn("总决赛", after["title"])
-        self.assertNotEqual(before["cover"], after["cover"])
-        self.assertEqual(public.get(before["cover"]).status_code, 404)
-        self.assertEqual(public.get("/api/login-presentation?mode=round").json, after)
-        self.assertEqual(public.get("/api/login-presentation?mode=puzzle").json["cover"], "")
+        self.assertEqual(after["cover"], cover)
+        self.assertEqual(public.get(f"/images/{first_image}").status_code, 404)
         self.assertEqual(self.admin.post(f"/manage/contests/{first}/activate").status_code, 400)
         self.assertEqual(public.get("/api/login-presentation").json["title"], after["title"])
 
@@ -224,6 +231,8 @@ class PlatformTest(unittest.TestCase):
         for page in (puzzle, rounds):
             self.assertNotIn("解题模式", page)
             self.assertNotIn("AWDP", page)
+            self.assertNotIn("<button", page)
+            self.assertNotIn("<a ", page)
             for medal in ("金色奖杯", "银色奖杯", "铜色奖杯"):
                 self.assertIn(medal, page)
         self.assertIn("解出动态", puzzle)
@@ -242,7 +251,10 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(player.get(download).status_code, 404)
         self.assertEqual(player.get(f"/challenges/{puzzle_id}").status_code, 404)
         self.post(self.admin, f"/manage/contests/{puzzle_contest}/activate")
-        self.assertEqual(player.get("/").location, "/puzzle")
+        lobby = player.get("/")
+        self.assertEqual(lobby.status_code, 200)
+        self.assertIn('href="/puzzle"', lobby.get_data(as_text=True))
+        self.assertIn('href="/awdp"', lobby.get_data(as_text=True))
         self.assertEqual(player.get(download).status_code, 200)
 
         round_contest = self.contest("蓝域杯 · 回合赛", mode="round", active=False)
@@ -266,17 +278,17 @@ class PlatformTest(unittest.TestCase):
 
         self.post(self.admin, f"/manage/contests/{round_contest}/activate")
         self.assertEqual(self.lookup("SELECT id FROM contests WHERE active = 1")[0][0], round_contest)
-        self.assertEqual(player.get("/").location, "/awdp")
+        self.assertIn("回合赛", player.get("/").get_data(as_text=True))
         self.assertIn("档案检索新版", player.get(detail).get_data(as_text=True))
         self.assertNotIn("回合赛", player.get("/puzzle").get_data(as_text=True))
         self.assertEqual(player.get(f"/challenges/{puzzle_id}").status_code, 404)
         self.assertEqual(player.get(download).status_code, 404)
         self.assertEqual(player.get("/rankings?kind=puzzle").status_code, 404)
         self.assertEqual(player.get("/submissions?kind=flag").status_code, 404)
-        scoped = self.app.test_client()
-        self.assertIn("AWDP", scoped.get("/login?mode=round").get_data(as_text=True))
-        response = self.post(scoped, "/login?mode=round", code=302, username="bluefox", password=self.password)
-        self.assertEqual(response.location, "/awdp")
+        client = self.app.test_client()
+        client.get("/login")
+        response = self.post(client, "/login", code=302, username="bluefox", password=self.password)
+        self.assertEqual(response.location, "/")
 
     def test_upgrade_legacy_contests_preserves_challenges(self):
         puzzle_only = self.contest("仅解题", active=False)
@@ -408,7 +420,7 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, "/manage/accounts/new", username="bluefox", display_name="New Fox",
                   password=self.password, role="player", enabled="1")
         self.assertGreater(self.lookup("SELECT id FROM users WHERE username = 'bluefox'")[0][0], user_id)
-        self.assertEqual(player.get("/puzzle").location, "/login?mode=puzzle")
+        self.assertEqual(player.get("/puzzle").location, "/login")
 
         admin_id = self.lookup("SELECT id FROM users WHERE role = 'admin'")[0][0]
         admin_route = f"/manage/accounts/{admin_id}/delete"

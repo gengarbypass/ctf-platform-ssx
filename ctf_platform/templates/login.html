@@ -1,28 +1,29 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block shell %}
-<div class="arena-entry" data-login-presentation="{{ url_for('site.login_presentation', mode=entry_mode) }}">
+<div class="arena-entry" data-login-presentation="{{ url_for('site.login_presentation') }}">
+  <img class="arena-entry-image" src="{{ login_background }}" width="1672" height="941" alt="" fetchpriority="high">
   <header class="arena-entry-header">{{ ui.mark(g.brand) }}<span data-brand-name>{{ g.brand.name }}</span></header>
   <main class="arena-entry-main">
-    <div class="arena-entry-card">
-      {{ ui.hero(g.contest, g.match, true) }}
-      <form class="arena-entry-form" action="{{ url_for('site.login', mode=entry_mode) }}" method="post">
-        {{ ui.csrf() }}
-        <header><h1>{{ title }}</h1></header>
-        <label class="arena-field">账号<input class="arena-input" name="username" type="text" value="{{ username|default('') }}" placeholder="输入账号" autocomplete="username" spellcheck="false" maxlength="40" required></label>
-        <label class="arena-field">密码<input class="arena-input" name="password" type="password" placeholder="输入密码" autocomplete="current-password" maxlength="128" required></label>
-        {% if error %}<div class="arena-feedback error" role="alert">{{ error }}</div>{% endif %}
-        <button class="arena-btn primary" type="submit">登录</button>
-        <nav class="arena-actions" aria-label="比赛入口">
-          {% if entry_mode %}
-            {{ ui.link("返回统一登录", url_for('site.login'), "link", "back") }}
-          {% else %}
-            {{ ui.link("解题赛入口", url_for('site.puzzle_home'), "link", "next") }}
-            {{ ui.link("AWDP 入口", url_for('site.awdp'), "link", "next") }}
-          {% endif %}
-        </nav>
-      </form>
-    </div>
+    <section class="arena-entry-intro" aria-labelledby="arena-entry-slogan">
+      <h1 id="arena-entry-slogan">筑牢边疆数字防线、<br>锻造基层网安尖兵</h1>
+      <div class="arena-entry-event" data-login-event{% if not g.contest %} hidden{% endif %}>
+        <div class="arena-actions">
+          <strong data-event-title>{{ g.contest.title if g.contest else '' }}</strong>
+          <span class="arena-pill hero-status" data-event-status>{{ g.match.label if g.match else '' }}</span>
+        </div>
+        <p data-event-summary>{{ g.contest.summary if g.contest else '' }}</p>
+        <p data-event-schedule>{{ contest_schedule(g.contest) ~ ' · ' ~ timezone if g.contest else '' }}</p>
+      </div>
+    </section>
+    <form class="arena-entry-form" action="{{ url_for('site.login') }}" method="post" aria-labelledby="arena-login-title">
+      {{ ui.csrf() }}
+      <header><h2 id="arena-login-title">{{ title }}</h2></header>
+      <label class="arena-field">账号<input class="arena-input" name="username" type="text" value="{{ username|default('') }}" placeholder="输入账号" autocomplete="username" spellcheck="false" maxlength="40" required></label>
+      <label class="arena-field">密码<input class="arena-input" name="password" type="password" placeholder="输入密码" autocomplete="current-password" maxlength="128" required></label>
+      {% if error %}<div class="arena-feedback error" role="alert">{{ error }}</div>{% endif %}
+      <button class="arena-btn primary" type="submit">登录</button>
+    </form>
   </main>
 </div>
 {% endblock %}

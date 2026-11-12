@@ -15,7 +15,7 @@ normalize_port() {
 }
 
 if [[ $# -eq 1 && $1 == "--help" ]]; then
-    printf '%s\n' "用法：sudo bash deploy.sh [公网端口]" "首次部署默认端口 8000，后续默认沿用已部署端口。"
+    printf '%s\n' "用法：sudo bash deploy.sh [公网端口]" "首次部署默认端口 80，后续默认沿用已部署端口。"
     exit 0
 fi
 (( $# <= 1 )) || fail "用法：sudo bash deploy.sh [公网端口]"
@@ -125,7 +125,7 @@ if [[ -z $port ]]; then
     previous=("${compose[@]}")
     if [[ -f $ecs_file ]]; then previous+=(--env-file "$ecs_file"); fi
     saved_port=$("${previous[@]}" config --environment | tr -d '\r' | awk '/^CTF_PORT=/{print substr($0, 10)}')
-    port=$(normalize_port "${saved_port:-8000}") || fail "配置中的 CTF_PORT 无效，请用 deploy.sh 指定正确端口。"
+    port=$(normalize_port "${saved_port:-80}") || fail "配置中的 CTF_PORT 无效，请用 deploy.sh 指定正确端口。"
 fi
 
 ecs_tmp=$(mktemp "$root/.env.ecs.XXXXXX")
@@ -200,7 +200,9 @@ public_ip=${CTF_PUBLIC_IP:-}
 if ! valid_ipv4 "$public_ip"; then
     public_ip=$(ecs_public_ip) || public_ip="ECS公网IP"
 fi
-printf '部署完成，公网入口 http://%s:%s\n' "$public_ip" "$port"
+origin="http://$public_ip"
+if (( port != 80 )); then origin+=":$port"; fi
+printf '部署完成，登录入口 %s/login\n' "$origin"
 if [[ -n $revision ]]; then
     printf '运行版本 %s，可在 /healthz 核对。\n' "$revision"
 fi

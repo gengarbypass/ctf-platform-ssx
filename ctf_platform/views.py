@@ -16,34 +16,20 @@ from .storage import read_upload, save_upload, serve_upload
 
 site = Blueprint("site", __name__)
 PAGE_SIZE = 30
+LOGIN_BACKGROUND = "login-frontier.webp"
 
 
 def page_number():
     return min(max(request.args.get("page", 1, type=int), 1), 1_000_000)
 
 
-def entry_url(mode):
-    return url_for("site.puzzle_home" if mode == "puzzle" else "site.awdp")
-
-
-def first_page(mode=None):
-    if g.user["role"] == "admin":
-        return url_for("manage.overview")
-    mode = mode or (g.contest["mode"] if g.contest else None)
-    return entry_url(mode) if mode else url_for("site.home")
+def first_page():
+    return url_for("manage.overview" if g.user["role"] == "admin" else "site.home")
 
 
 def scope_entry(mode):
-    if mode and g.contest and g.contest["mode"] != mode:
+    if g.contest and g.contest["mode"] != mode:
         g.contest = g.match = g.team = None
-
-
-def login_mode():
-    mode = request.args.get("mode")
-    if mode is not None and mode not in CONTEST_MODES:
-        abort(404)
-    scope_entry(mode)
-    return mode
 
 
 def records_kind(contest):
@@ -56,10 +42,9 @@ def records_kind(contest):
 
 @site.route("/login", methods=["GET", "POST"])
 def login():
-    mode = login_mode()
     if g.user:
-        return redirect(first_page(mode))
-    presentation = {"title": f"{CONTEST_MODES[mode]} · 登录" if mode else "登录比赛平台", "entry_mode": mode}
+        return redirect(first_page())
+    presentation = {"title": "登录比赛平台", "login_background": url_for("static", filename=LOGIN_BACKGROUND)}
     if request.method == "GET":
         return render_template("login.html", **presentation)
     username = request.form.get("username", "").strip().lower()
@@ -85,7 +70,7 @@ def login():
     session.update(user_id=user["id"], auth_version=user["auth_version"])
     session.permanent = True
     g.user = user
-    return redirect(first_page(mode))
+    return redirect(first_page())
 
 
 @site.post("/logout")
@@ -97,13 +82,12 @@ def logout():
 
 @site.get("/api/login-presentation")
 def login_presentation():
-    login_mode()
     contest = g.contest
     return jsonify(
         title=contest["title"] if contest else g.brand["name"],
         summary=contest["summary"] if contest else "比赛开启后，赛程和赛题将在这里展示。",
         schedule=f"{contest_schedule(contest)} · {current_app.config['TIME_ZONE'].key}" if contest else "",
-        cover=url_for("site.image", file_id=contest["cover_id"]) if contest and contest["cover_id"] else "",
+        cover=url_for("static", filename=LOGIN_BACKGROUND),
         status=g.match["label"] if g.match else "等待开赛",
     )
 
@@ -111,15 +95,14 @@ def login_presentation():
 @site.get("/")
 @login_required
 def home():
-    if g.user["role"] == "admin" or g.contest:
+    if g.user["role"] == "admin":
         return redirect(first_page())
     return render_template("home.html", title="比赛首页", entry_mode=None)
 
 
 @site.get("/puzzle")
+@login_required
 def puzzle_home():
-    if not g.user:
-        return redirect(url_for("site.login", mode="puzzle"))
     scope_entry("puzzle")
     metrics = {}
     if g.contest:
@@ -131,7 +114,7 @@ def puzzle_home():
             ).fetchone()[0]
         if g.team:
             metrics["puzzle"] = next((row for row in puzzle_rankings(db, contest_id) if row["id"] == g.team["id"]), None)
-    return render_template("home.html", title="比赛首页", entry_mode="puzzle", metrics=metrics)
+    return render_template("home.html", title="解题赛", entry_mode="puzzle", metrics=metrics)
 
 
 @site.get("/challenges")
@@ -247,9 +230,8 @@ def submit_flag(puzzle_id):
 
 
 @site.get("/awdp")
+@login_required
 def awdp():
-    if not g.user:
-        return redirect(url_for("site.login", mode="round"))
     scope_entry("round")
     view = request.args.get("view", "live")
     if view not in {"live", "tasks", "teams", "patches"}:
@@ -268,7 +250,7 @@ def awdp():
             "patches": patch_records(db, contest_id, team_id=team_id, limit=10) if team_id else [],
             "standings": round_rankings(db, contest_id),
         }
-    return render_template("awdp.html", title="比赛首页" if view == "live" else "AWDP", view=view, data=data)
+    return render_template("awdp.html", title="AWDP", view=view, data=data)
 
 
 @site.get("/awdp/challenges/<int:task_id>")
@@ -412,16 +394,8 @@ def board_snapshot(kind):
 @login_required
 def scoreboard(kind):
     board, timing = board_snapshot(kind)
-    back = request.args.get("from")
-    destination = url_for("site.ranking", kind=kind) if timing["id"] else entry_url(kind)
-    if back == "manage" and g.user["role"] == "admin":
-        destination = url_for("manage.overview")
-    elif back == "challenges" and kind == "puzzle" and timing["id"]:
-        destination = url_for("site.puzzles")
-    elif back == "awdp" and kind == "round":
-        destination = url_for("site.awdp")
     return render_template("scoreboard.html", title="计分板大屏", kind=kind, board=board, timing=timing,
-                           destination=destination, poll_seconds=current_app.config["BOARD_POLL_SECONDS"])
+                           poll_seconds=current_app.config["BOARD_POLL_SECONDS"])
 
 
 @site.get("/api/scoreboard/<kind>")

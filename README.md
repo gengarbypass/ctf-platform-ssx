@@ -1,18 +1,18 @@
 # 蓝域 CTF
 
-蓝白配色的 PC 端 CTF 平台。使用统一账号入口，登录后按账号权限进入比赛首页或赛事工作台。
+蓝白配色的 PC 端 CTF 平台。通过 `/login` 统一登录，按账号权限进入比赛首页或赛事工作台。
 
 - 解题支持分类题库、题目详情、多附件下载、Flag 判定弹窗、队伍积分、提交记录和排行榜。
 - AWDP 支持赛题、ZIP 补丁与加固说明、评测记录、队伍服务状态、回合进度和计分流水。
-- 两块大屏各有独立入口。解题大屏展示领奖台与解出动态，回合大屏展示回合计分、服务状态与得分流水。前三名显示金、银、铜奖杯，大屏支持自动刷新、暂停和浏览器全屏。
-- 平台名称、图标、Logo、颜色和圆角可在「品牌与外观」修改。当前比赛的背景图、标题、简介和赛程由「比赛配置」管理。登录页和比赛首页读取当前开启的比赛。
+- 两块大屏各有独立入口。解题大屏展示领奖台与解出动态，回合大屏展示回合计分、服务状态与得分流水。前三名显示金、银、铜奖杯。大屏自动刷新并展示分数和排名变化。
+- 登录页使用独立封面和标语「筑牢边疆数字防线、锻造基层网安尖兵」，动态显示当前比赛的文字信息。比赛首页使用当前比赛的背景图、标题、简介和赛程。平台名称、图标、Logo、颜色和圆角可在「品牌与外观」修改。
 
 ## 比赛入口与筹备
 
 - 解题赛入口为 `/puzzle`，提供题库、Flag 提交、排行榜和解题计分板。
 - AWDP 入口为 `/awdp`，提供赛场、补丁提交、队伍服务状态和回合计分板。
 
-两个入口共用账号。通过统一登录进入时，参赛账号会跳转到当前开启的比赛，赛事账号进入工作台。直接访问某个比赛入口时，只有同类型的比赛开启才显示该场比赛。
+参赛账号登录后从左侧导航选择「解题赛」或「AWDP」，赛事账号登录后进入工作台。只有同类型的比赛开启时，对应入口才显示该场比赛。
 
 在「比赛配置」创建比赛时选择解题赛或 AWDP，并设置赛程与封面。AWDP 需要设置每回合时长，解题赛按开赛和结束时间运行。保存后会直接进入题库。已创建的比赛可在比赛列表点「管理赛题」，提前创建、编辑赛题、上传解题附件或设置开放状态。创建参赛账号和队伍后，在队伍管理中分队。准备完成后选择「开启比赛」。同一时间只开启一场，开启另一场会撤下原来的比赛。赛题和附件在比赛开启且到达开赛时间后开放。
 
@@ -27,14 +27,14 @@
 ```bash
 git clone https://github.com/gengarbypass/ctf-platform-ssx.git
 cd ctf-platform-ssx
-sudo bash deploy.sh 8000
+sudo bash deploy.sh
 ```
 
 脚本会构建并启动平台，将所选 TCP 端口发布到 `0.0.0.0`，并检查健康接口。首次运行会创建 `.env`，其中保存初始账号 `arenaops` 和随机密码。已有 `.env` 和数据库继续使用。Ubuntu、Debian 和 Alibaba Cloud Linux 3 缺少 Docker 组件时，脚本会从软件源安装。其他 Linux 系统可预装 Docker Engine、Buildx 和 Compose 插件后运行。[Alibaba Cloud Linux 3 安装 Docker](https://help.aliyun.com/zh/document_detail/2842585.html) · [Docker Compose 插件安装](https://docs.docker.com/compose/install/linux/)
 
-在 **ECS 控制台 → 实例关联的安全组 → 入方向** 添加允许规则，协议选自定义 TCP，目的端口填 `8000`。授权对象填需要访问的公网 IP 段。若要向所有 IPv4 来源公开，填 `0.0.0.0/0`。实例启用系统防火墙时，也按同一访问范围放行所选端口。然后从实例外访问 `http://ECS公网IPv4:8000`。此入口使用 HTTP。[阿里云安全组说明](https://help.aliyun.com/zh/ecs/user-guide/start-using-security-groups)
+在 **ECS 控制台 → 实例关联的安全组 → 入方向** 添加允许规则，协议选自定义 TCP，目的端口填 `80`。授权对象填需要访问的公网 IP 段。若要向所有 IPv4 来源公开，填 `0.0.0.0/0`。实例启用系统防火墙时，也按同一访问范围放行所选端口。然后从实例外访问 `http://ECS公网IPv4/login`。[阿里云安全组说明](https://help.aliyun.com/zh/ecs/user-guide/start-using-security-groups)
 
-需要换端口时，运行 `sudo bash deploy.sh 8080`，并同步调整安全组。脚本将部署端口写入 `.env.ecs`。更新时在同一目录拉取新版，再运行 `sudo bash deploy.sh`，沿用上次端口和数据卷。脚本可从 ECS 元数据识别公网 IPv4，用于显示访问地址。
+现有实例如需切换到 `http://ECS公网IPv4/login`，在原项目目录拉取新版，运行 `sudo bash deploy.sh 80`，并放行 TCP `80`。如需使用其他空闲端口，例如 `8080`，运行 `sudo bash deploy.sh 8080` 并访问 `http://ECS公网IPv4:8080/login`。脚本将部署端口写入 `.env.ecs`。同一目录更新时，`sudo bash deploy.sh` 沿用上次端口和数据卷。
 
 从 Git 仓库运行部署脚本时，脚本会核对并打印正在运行的提交。打开平台公网地址的 `/healthz`，其中 `revision` 应与服务器项目目录的 `git rev-parse HEAD` 一致。
 
@@ -45,7 +45,7 @@ sudo bash deploy.sh 8000
 1. 把项目源码放到服务器，在项目根目录运行 `cp .env.example .env`。
 2. 编辑 `.env`，为 `CTF_ADMIN_PASSWORD` 设置至少 12 个字符的随机密码。
 3. 执行 `docker compose up -d --build`，然后用 `docker compose ps` 查看运行和健康状态。
-4. 打开 `http://服务器地址:8000`，使用环境变量中配置的账号和密码登录。
+4. 打开 `http://服务器地址/login`，使用环境变量中配置的账号和密码登录。
 
 首个账号只在空数据库中创建。后续改密在「账号管理」完成。已创建账号后，`CTF_ADMIN_PASSWORD` 可以从运行配置移除。生产环境通过 HTTPS 反向代理访问时，将 `CTF_BIND_HOST` 设为 `127.0.0.1`、`CTF_COOKIE_SECURE` 设为 `1`，并在代理中允许与应用设置一致的请求体大小。
 
@@ -58,7 +58,7 @@ sudo bash deploy.sh 8000
 | `CTF_SECRET_KEY` | 自动生成 | 可选会话签名密钥，手动设置至少 32 个字符。更换后旧会话失效 |
 | `CTF_TIME_ZONE` | `Asia/Shanghai` | IANA 赛程和记录时区 |
 | `CTF_BIND_HOST` | `0.0.0.0` | Compose 宿主机绑定地址 |
-| `CTF_PORT` | `8000` | Compose 对外端口 |
+| `CTF_PORT` | `80` | Compose 对外端口 |
 | `CTF_COOKIE_SECURE` | `0` | HTTPS 部署设置为 `1` |
 | `CTF_MAX_UPLOAD_MB` | `16` | 每次上传请求总大小，单位 MiB |
 | `CTF_BOARD_POLL_SECONDS` | `4` | 大屏刷新间隔，单位秒 |

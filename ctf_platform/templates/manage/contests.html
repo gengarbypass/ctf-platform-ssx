@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("比赛配置", "比赛标题、简介、赛程与背景图会同步显示在登录页和比赛首页。") %}
+  {% call ui.heading("比赛配置", "设置比赛模式、赛程和比赛首页背景图。") %}
     {{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}
   {% endcall %}
   {% call ui.panel("比赛列表") %}

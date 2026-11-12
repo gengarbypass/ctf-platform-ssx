@@ -152,7 +152,7 @@ def activate_contest(contest_id):
         db.execute("UPDATE contests SET active = 0 WHERE active = 1")
         db.execute("UPDATE contests SET active = 1 WHERE id = ?", (contest_id,))
     session["manage_contest_id"] = contest_id
-    return saved("当前比赛已切换，登录页和计分板将读取新的比赛配置。", "manage.contests")
+    return saved("当前比赛已切换。", "manage.contests")
 
 
 @manage.post("/contests/<int:contest_id>/deactivate")

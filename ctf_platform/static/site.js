@@ -30,25 +30,16 @@ for (const dialog of document.querySelectorAll("[data-auto-dialog]")) {
 
 const login = document.querySelector("[data-login-presentation]");
 if (login) {
-  const cover = login.querySelector("[data-login-cover]");
-  const image = cover.querySelector("img");
-  const art = cover.querySelector(".arena-art");
-  const date = cover.querySelector("[data-event-date]");
+  const eventCard = login.querySelector("[data-login-event]");
   async function updatePresentation() {
     try {
       const response = await fetch(login.dataset.loginPresentation, { cache: "no-store", signal: AbortSignal.timeout(6500) });
       if (!response.ok) return;
       const event = await response.json();
-      cover.querySelector("[data-event-title]").textContent = event.title;
-      cover.querySelector("[data-event-summary]").textContent = event.summary;
-      cover.querySelector("[data-event-status]").textContent = event.status;
-      cover.querySelector("[data-event-schedule]").textContent = event.schedule;
-      date.hidden = !event.schedule;
-      cover.classList.toggle("has-image", Boolean(event.cover));
-      if (event.cover && image.getAttribute("src") !== event.cover) image.src = event.cover;
-      if (!event.cover) image.removeAttribute("src");
-      image.hidden = !event.cover;
-      art.hidden = Boolean(event.cover);
+      for (const field of ["title", "summary", "status", "schedule"]) {
+        eventCard.querySelector("[data-event-" + field + "]").textContent = event[field];
+      }
+      eventCard.hidden = !event.schedule;
     } catch {
       // Leave the last successful presentation visible during temporary disconnections.
     } finally {

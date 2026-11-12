@@ -22,12 +22,10 @@
 
     & *, & *::before, & *::after { box-sizing: border-box; }
     &[hidden], & [hidden] { display: none !important; }
-    &:fullscreen { overflow: auto; }
     & :is(h1, h2, p) { margin: 0; color: inherit; }
     & .sb-inner { position: relative; max-width: 1510px; margin-inline: auto; }
     & .sb-chrome { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 7px 16px; min-height: 38px; }
-    & .sb-brand, & .sb-actions { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 7px; }
-    & .sb-brand { color: var(--sb-ink); font-size: 14px; font-weight: 750; }
+    & .sb-brand { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--sb-ink); font-size: 14px; font-weight: 750; }
     & .sb-brand-name { overflow-wrap: anywhere; }
     & .sb-mark { display: grid; place-items: center; flex: 0 0 auto; width: 33px; height: 33px; overflow: hidden; border-radius: 8px; color: #fff; background: linear-gradient(145deg,#5187f2,var(--sb-blue)); box-shadow: 0 4px 13px #2653bb32, inset 0 1px #ffffff50; }
     & .sb-mark img { width: 100%; height: 100%; max-width: none; object-fit: contain; background: white; }
@@ -35,13 +33,10 @@
     & .sb-icon i:empty { display: none; }
     & .sb-icon svg { width: 100%; height: 100%; stroke-width: 1.75; }
     & .sb-icon svg + span { display: none; }
-    & .sb-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 4px 9px; border: 1px solid #c8d9f4; border-radius: 7px; background: var(--sb-paper); color: var(--sb-blue-ink); font: 660 12px/1.4 Inter,"Microsoft YaHei UI",sans-serif; white-space: nowrap; }
-    & .sb-btn:hover { border-color: var(--sb-blue); background: var(--sb-soft); }
-    & .sb-btn:focus-visible { outline: 2px solid var(--sb-blue); outline-offset: 2px; }
     & .sb-status { display: inline-flex; align-items: center; gap: 5px; margin-right: 3px; color: var(--sb-blue-ink); font-size: 11px; font-weight: 650; white-space: nowrap; }
     & .sb-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #4384ee; box-shadow: 0 0 8px #5394ee80; }
-    & .sb-status.is-paused { color: var(--sb-muted); }
-    & .sb-status.is-paused::before { background: #8396b4; box-shadow: none; }
+    & .sb-status.is-stale { color: var(--sb-muted); }
+    & .sb-status.is-stale::before { background: #8396b4; box-shadow: none; }
     & .sb-feedback { margin-top: 6px; color: var(--sb-muted); font-size: 12px; }
     & .sb-hero { position: relative; display: flex; justify-content: space-between; align-items: end; gap: 16px; isolation: isolate; margin-top: 10px; padding: 13px 0 17px; border-bottom: 1px solid #bfd5fa; }
     & .sb-hero::before { content: ""; position: absolute; z-index: -1; inset: -7px 0 0 23%; opacity: .68; pointer-events: none; background: radial-gradient(ellipse at 84% 56%, transparent 32%, #6fa3f744 32.6% 33.1%, transparent 33.7% 43%, #6fa3f733 43.6% 44.1%, transparent 44.6%), linear-gradient(#5985d524 1px,transparent 1px) 0 0 / 24px 24px, linear-gradient(90deg,#5985d524 1px,transparent 1px) 0 0 / 24px 24px; mask-image: linear-gradient(90deg,transparent,#000 80%); }
@@ -172,12 +167,10 @@
       & .sb-round-label { font-size: 15px; }
       & .sb-table:not(.sb-table-round) :is(th,td) { padding-inline: 5px; }
     }
-    @media (pointer: coarse) { & .sb-btn { min-height: 44px; } }
   }
 
 #lanyu-arena #ctf-scoreboard {
   min-height: 100vh;
-  & .sb-btn { text-decoration: none; }
   & .sb-empty { margin: 0; padding: 15px 13px; color: var(--sb-muted); font-size: 12px; }
   & .sb-empty-panel { margin-top: 12px; }
   & .sb-health-chip.unknown { color: #586d8d; background: #edf1f8; }

@@ -45,19 +45,38 @@
   #lanyu-arena .arena-crumb { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; color: var(--arena-muted); }
   #lanyu-arena .arena-crumb strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--arena-ink); font-weight: 650; }
   #lanyu-arena .arena-crumb .arena-icon { width: 13px; height: 13px; color: #8596b0; }
-  #lanyu-arena .arena-entry { background: var(--arena-bg); }
-  #lanyu-arena .arena-entry-header { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 0 var(--arena-main-pad); border-bottom: 1px solid var(--arena-border); background: var(--arena-paper); font-size: 16px; font-weight: 750; }
-  #lanyu-arena .arena-entry-main { display: grid; place-items: center; min-height: 606px; padding: 38px var(--arena-main-pad); }
-  #lanyu-arena .arena-entry-card { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); width: min(840px, 100%); min-height: 424px; overflow: hidden; border: 1px solid var(--arena-border); border-radius: calc(var(--arena-radius) + 5px); background: var(--arena-paper); box-shadow: 0 17px 49px #142f6710; }
-  #lanyu-arena .arena-entry-card .arena-entry-cover { min-height: 0; align-content: end; padding: 29px; border-radius: 0; }
-  #lanyu-arena .arena-entry-cover .arena-hero-copy { max-width: 100%; }
-  #lanyu-arena .arena-entry-cover.has-image .arena-hero-image { object-position: 64% center; }
-  #lanyu-arena .arena-entry-card .arena-entry-cover.has-image::after { background: linear-gradient(0deg,#081a42fb 0%,#081a42d5 24%,#081a4236 58%,#102d6812 100%); }
-  #lanyu-arena .arena-entry-cover h2 { margin-top: 8px; font-size: 29px; line-height: 1.22; font-weight: 750; letter-spacing: -.03em; overflow-wrap: anywhere; }
-  #lanyu-arena .arena-entry-cover .arena-art { inset: 5% 0 auto; width: 100%; height: 66%; }
-  #lanyu-arena .arena-entry-cover .arena-art-shield { transform: translate(-50%, -50%) rotate(-9deg) scale(1.24); }
-  #lanyu-arena .arena-entry-form { align-self: center; justify-self: center; display: grid; gap: 14px; width: min(100%, 374px); padding: 30px; }
-  #lanyu-arena .arena-entry-form h1 { font-size: 27px; line-height: 1.25; font-weight: 750; letter-spacing: -.03em; }
+  #lanyu-arena .arena-entry {
+    --entry-inset: clamp(24px, 6vw, 94px);
+    position: relative; isolation: isolate; display: grid; grid-template-rows: auto 1fr;
+    min-height: 100vh; background: #081d3a; color: #fff;
+  }
+  #lanyu-arena .arena-entry-image { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #lanyu-arena .arena-entry::after {
+    content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none;
+    background: linear-gradient(90deg, #04152cce 0%, #071c3a8c 38%, #081e401c 76%, #091d3952 100%);
+  }
+  #lanyu-arena .arena-entry-header, #lanyu-arena .arena-entry-main { width: min(100%, 1520px); margin-inline: auto; padding-inline: var(--entry-inset); }
+  #lanyu-arena .arena-entry-header { display: flex; align-items: center; gap: 11px; min-width: 0; padding-block: 24px; font-size: 17px; font-weight: 750; }
+  #lanyu-arena .arena-entry-main {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(305px, 390px); align-items: center;
+    gap: clamp(24px, 5.6vw, 92px); padding-block: 36px clamp(48px, 10vh, 112px);
+  }
+  #lanyu-arena .arena-entry-intro { display: grid; gap: 24px; min-width: 0; margin-bottom: clamp(16px, 12vh, 105px); }
+  #lanyu-arena .arena-entry-intro h1 { font-size: clamp(32px, 3.8vw, 58px); font-weight: 770; line-height: 1.3; letter-spacing: .025em; text-shadow: 0 3px 26px #031328aa; }
+  #lanyu-arena .arena-entry-event {
+    justify-self: start; display: grid; gap: 4px; width: fit-content; max-width: min(100%, 470px); padding: 11px 15px;
+    border: 1px solid #a9d0ff38; border-radius: var(--arena-radius); background: #061a34c2; color: #deebff;
+  }
+  #lanyu-arena .arena-entry-event strong { color: #fff; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-entry-event p { font-size: 12px; overflow-wrap: anywhere; }
+  #lanyu-arena .arena-entry-event [data-event-summary] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  #lanyu-arena .arena-entry-event [data-event-summary]:empty { display: none; }
+  #lanyu-arena .arena-entry-form {
+    display: grid; gap: 15px; min-width: 0; padding: clamp(23px, 3.2vw, 39px);
+    color: var(--arena-ink); background: var(--arena-paper); border: 1px solid #dce7f5;
+    border-radius: calc(var(--arena-radius) + 5px); box-shadow: 0 18px 62px #04152d58;
+  }
+  #lanyu-arena .arena-entry-form h2 { font-size: 27px; line-height: 1.25; font-weight: 750; letter-spacing: -.03em; }
   #lanyu-arena .arena-entry-form > header { margin-bottom: 6px; }
   #lanyu-arena .arena-entry-form .arena-input { min-height: 42px; }
   #lanyu-arena .arena-entry-form .arena-btn { width: 100%; min-height: 42px; margin-top: 3px; }
@@ -285,20 +304,16 @@
     #lanyu-arena .arena-hero { min-height: 196px; padding: 17px; }
     #lanyu-arena .arena-art-shield { transform: translate(-50%, -50%) rotate(-9deg) scale(.84); }
     #lanyu-arena .arena-mode-head { grid-template-columns: minmax(0, 1fr); }
+    #lanyu-arena .arena-entry-main { grid-template-columns: minmax(0, 1fr); align-content: center; }
+    #lanyu-arena .arena-entry-intro { margin-bottom: 0; }
+    #lanyu-arena .arena-entry-form { width: min(100%, 410px); }
   }
   @media (max-width: 560px) {
     #lanyu-arena .arena-top { grid-template-columns: minmax(0, 1fr) auto; }
     #lanyu-arena .arena-brand { border-right: 0; height: 52px; }
     #lanyu-arena .arena-crumb { display: none; }
-    #lanyu-arena .arena-entry-main { min-height: 0; padding-block: 20px; }
-    #lanyu-arena .arena-entry-card { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-    #lanyu-arena .arena-entry-card .arena-entry-cover { min-height: 175px; padding: 16px; }
-    #lanyu-arena .arena-entry-cover .arena-hero-copy { max-width: 78%; }
-    #lanyu-arena .arena-entry-cover.has-image .arena-hero-copy { max-width: 100%; }
-    #lanyu-arena .arena-entry-cover .arena-art { inset: 0 -1% 0 auto; width: 40%; height: 100%; }
-    #lanyu-arena .arena-entry-cover .arena-art-shield { transform: translate(-50%, -50%) rotate(-9deg) scale(.63); }
-    #lanyu-arena .arena-entry-cover h2 { font-size: 24px; }
-    #lanyu-arena .arena-entry-form { padding: 22px 16px; }
+    #lanyu-arena .arena-entry-main { padding-block: 20px 34px; }
+    #lanyu-arena .arena-entry-intro h1 { font-size: clamp(23px, 6.2vw, 32px); }
     #lanyu-arena .arena-frame { grid-template-columns: minmax(0, 1fr); min-height: 0; }
     #lanyu-arena .arena-side { padding: 6px 9px; border: 0; border-bottom: 1px solid var(--arena-border); }
     #lanyu-arena .arena-side-label, #lanyu-arena .arena-profile { display: none; }
@@ -325,7 +340,6 @@ body { margin: 0; background: #f2f5fb; }
 #lanyu-arena .arena-frame { min-height: calc(100vh - 64px); }
 #lanyu-arena .arena-frame.standalone { grid-template-columns: minmax(0, 1fr); }
 #lanyu-arena .arena-main { width: 100%; max-width: 1440px; margin-inline: auto; }
-#lanyu-arena .arena-entry-main { min-height: max(510px, calc(100vh - 64px)); }
 #lanyu-arena .arena-nav a {
   position: relative; display: flex; align-items: center; gap: 9px; min-height: 41px; padding: 8px 9px;
   border: 1px solid transparent; border-radius: 8px; color: var(--arena-muted); font-size: 13px; white-space: nowrap;

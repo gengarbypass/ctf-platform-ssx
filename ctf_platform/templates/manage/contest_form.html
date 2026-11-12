@@ -35,7 +35,7 @@
           {{ ui.field("每回合分钟数","round_minutes",minutes,type='number',min=1,maximum=1440,required=mode=='round',disabled=mode!='round') }}
         </div>
       {% endif %}
-      <label class="arena-field">比赛背景图<input class="arena-input" type="file" name="cover" accept="image/png,image/jpeg,image/webp" data-image-input><small>显示在登录页和比赛首页。</small></label>
+      <label class="arena-field">比赛背景图<input class="arena-input" type="file" name="cover" accept="image/png,image/jpeg,image/webp" data-image-input><small>显示在比赛首页和对应赛场。</small></label>
       <img class="arena-cover-preview" alt="比赛背景图预览" data-image-preview{% if contest and contest.cover_id %} src="{{ url_for('site.image', file_id=contest.cover_id) }}"{% else %} hidden{% endif %}>
       {% if contest and contest.cover_id %}<label class="arena-checkbox"><input type="checkbox" name="remove_cover" value="1" data-remove-image>移除背景图</label>{% endif %}
       <div class="arena-actions"><button class="arena-btn primary" type="submit">保存比赛</button>{{ ui.link("取消",url_for('manage.contests')) }}</div>

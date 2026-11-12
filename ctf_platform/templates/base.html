@@ -32,14 +32,11 @@
           {% set teams_label = '队伍与服务' if managed_mode == 'round' else '队伍管理' %}
           {% set items = [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题目管理','manage.challenges','/manage/challenges','list'),(teams_label,'manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
         {% else %}
-          {% if g.contest and g.contest.mode == 'puzzle' %}
-            {% set items = [('比赛首页','site.puzzle_home','/puzzle','home'),('题库','site.puzzles','/challenges','flag')] %}
-          {% elif g.contest %}
-            {% set items = [('比赛首页','site.awdp','/awdp','home')] %}
-          {% else %}
-            {% set items = [('比赛首页','site.home','/','home')] %}
+          {% set items = [('比赛首页','site.home','/','home'),('解题赛','site.puzzle_home','/puzzle','flag'),('AWDP','site.awdp','/awdp','shield')] %}
+          {% if g.contest and request.endpoint != 'site.home' %}
+            {% if g.contest.mode == 'puzzle' %}{% set items = items + [('题库','site.puzzles','/challenges','list')] %}{% endif %}
+            {% set items = items + [('排行榜','site.ranking','/rankings','ranking'),('我的提交','site.records','/submissions','history')] %}
           {% endif %}
-          {% if g.contest %}{% set items = items + [('排行榜','site.ranking','/rankings','ranking'),('我的提交','site.records','/submissions','history')] %}{% endif %}
         {% endif %}
         {% for label, endpoint, path, glyph in items %}
           {% set destination = url_for(endpoint, kind=managed_mode) if endpoint == 'manage.challenges' else url_for(endpoint) %}

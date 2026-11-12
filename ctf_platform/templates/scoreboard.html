@@ -13,12 +13,7 @@
     <main class="sb-inner">
       <div class="sb-chrome">
         <div class="sb-brand"><span class="sb-mark">{% if g.brand.logo_id %}<img src="{{ url_for('site.image',file_id=g.brand.logo_id) }}" alt="">{% else %}{{ ui.icon(g.brand.icon) }}{% endif %}</span><span class="sb-brand-name">{{ g.brand.name }}</span></div>
-        <div class="sb-actions">
-          <span class="sb-status" data-board-status>{{ timing.status }}</span>
-          <button type="button" class="sb-btn" data-board-playback>暂停</button>
-          <button type="button" class="sb-btn" data-board-fullscreen hidden>全屏</button>
-          <a class="sb-btn" href="{{ destination }}">← 返回</a>
-        </div>
+        <span class="sb-status" data-board-status>{{ timing.status }}</span>
       </div>
       <div class="sb-feedback" data-board-feedback role="status" hidden></div>
       <header class="sb-hero">

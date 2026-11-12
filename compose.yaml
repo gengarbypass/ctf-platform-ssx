@@ -9,7 +9,7 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "${CTF_BIND_HOST:-0.0.0.0}:${CTF_PORT:-8000}:8000"
+      - "${CTF_BIND_HOST:-0.0.0.0}:${CTF_PORT:-80}:8000"
     environment:
       CTF_DATA_DIR: /data
       CTF_ADMIN_USERNAME: ${CTF_ADMIN_USERNAME:-arenaops}

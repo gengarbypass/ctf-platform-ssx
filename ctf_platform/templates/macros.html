@@ -67,15 +67,14 @@
   </select></label>
 {%- endmacro %}
 
-{% macro hero(contest, match, login=false, empty_title='等待比赛开启') -%}
-  <section class="arena-hero{% if login %} arena-entry-cover{% endif %}{% if contest and contest.cover_id %} has-image{% endif %}"{% if login %} data-login-cover{% endif %}>
+{% macro hero(contest, match, empty_title='等待比赛开启') -%}
+  <section class="arena-hero{% if contest and contest.cover_id %} has-image{% endif %}">
     <img class="arena-hero-image" alt=""{% if contest and contest.cover_id %} src="{{ url_for('site.image', file_id=contest.cover_id) }}"{% else %} hidden{% endif %}>
     <div class="arena-hero-copy">
-      <span class="arena-pill hero-status" data-event-status>{{ match.label if match else '等待开赛' }}</span>
-      {% if login %}<h2 data-event-title>{{ contest.title if contest else g.brand.name }}</h2>
-      {% else %}<h1 class="arena-hero-title" data-event-title>{{ contest.title if contest else empty_title }}</h1>{% endif %}
-      <p data-event-summary>{{ contest.summary if contest else '比赛开启后，赛程和赛题将在这里展示。' }}</p>
-      <div class="arena-hero-date" data-event-date{% if not contest %} hidden{% endif %}>{{ icon('calendar') }}<span data-event-schedule>{{ contest_schedule(contest) ~ ' · ' ~ timezone if contest else '' }}</span></div>
+      <span class="arena-pill hero-status">{{ match.label if match else '等待开赛' }}</span>
+      <h1 class="arena-hero-title">{{ contest.title if contest else empty_title }}</h1>
+      <p>{{ contest.summary if contest else '比赛开启后，赛程和赛题将在这里展示。' }}</p>
+      {% if contest %}<div class="arena-hero-date">{{ icon('calendar') }}<span>{{ contest_schedule(contest) ~ ' · ' ~ timezone }}</span></div>{% endif %}
     </div>
     <div class="arena-art" aria-hidden="true"{% if contest and contest.cover_id %} hidden{% endif %}>
       <i class="arena-art-orbit outer"></i><i class="arena-art-orbit"></i><div class="arena-art-shield"><span>{{ icon(g.brand.icon) }}</span></div><i class="arena-art-node"></i><i class="arena-art-node"></i>

@@ -2,24 +2,18 @@
 {% import "macros.html" as ui with context %}
 {% block content %}
   {{ ui.hero(g.contest, g.match, empty_title='解题赛' if entry_mode else '等待比赛开启') }}
-  {% if not entry_mode or g.contest %}
-    <nav class="arena-two arena-mode-grid" aria-label="{{ '比赛导航' if g.contest else '比赛入口' }}">
-      <a class="arena-panel arena-mode-card" href="{{ url_for('site.puzzles' if g.contest else 'site.puzzle_home') }}">
-        <div class="arena-mode-head"><span class="arena-icon-box">{{ ui.icon("flag") }}</span><div><h2>{{ "题库" if g.contest else "解题赛" }}</h2><p>按分类查看赛题，提交 Flag。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
-        {% if g.contest and metrics.puzzles is defined %}
+  {% if entry_mode == 'puzzle' and g.contest %}
+    <nav class="arena-two arena-mode-grid" aria-label="赛场导航">
+      <a class="arena-panel arena-mode-card" href="{{ url_for('site.puzzles') }}">
+        <div class="arena-mode-head"><span class="arena-icon-box">{{ ui.icon("flag") }}</span><div><h2>题库</h2><p>按分类查看赛题，提交 Flag。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
+        {% if metrics.puzzles is defined %}
         <div class="arena-mode-metrics"><span><strong>{{ metrics.puzzles }}</strong> 道赛题</span>{% if metrics.puzzle %}<span>已解 <strong>{{ metrics.puzzle.solved }}</strong> 道</span>{% endif %}</div>
         {% endif %}
       </a>
-      {% if g.contest %}
       <a class="arena-panel arena-mode-card" href="{{ url_for('site.ranking') }}">
         <div class="arena-mode-head"><span class="arena-icon-box alt">{{ ui.icon("ranking") }}</span><div><h2>排行榜</h2><p>查看队伍积分与排名。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
         {% if metrics.puzzle %}<div class="arena-mode-metrics"><span>本队 <strong>{{ '{:,}'.format(metrics.puzzle.points) }}</strong> 分</span></div>{% endif %}
       </a>
-      {% else %}
-      <a class="arena-panel arena-mode-card" href="{{ url_for('site.awdp') }}">
-        <div class="arena-mode-head"><span class="arena-icon-box alt">{{ ui.icon("shield") }}</span><div><h2>AWDP</h2><p>提交补丁，查看服务状态与回合得分。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
-      </a>
-      {% endif %}
     </nav>
   {% endif %}
   {% if g.contest and not g.team and g.user.role == 'player' %}

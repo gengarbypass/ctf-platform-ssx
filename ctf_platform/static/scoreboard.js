@@ -3,26 +3,20 @@
 const board = document.getElementById("ctf-scoreboard");
 const query = selector => board.querySelector(selector);
 const content = query("[data-board-content]");
-const playback = query("[data-board-playback]");
-const fullscreen = query("[data-board-fullscreen]");
 const feedback = query("[data-board-feedback]");
 const status = query("[data-board-status]");
 const clock = query("[data-board-clock]");
 const segments = query("[data-board-segments]");
 const formatPoints = new Intl.NumberFormat("zh-CN");
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
-const pauseDelay = Number(board.dataset.boardPoll) * 1000;
+const refreshDelay = Number(board.dataset.boardPoll) * 1000;
 let timing = JSON.parse(board.dataset.boardTiming);
 let receivedAt = performance.now();
 let contentMarkup = null;
 let progressSignature = null;
-let paused = false;
-let timer;
-let connection;
 let animationFrame;
 
 function updateClock() {
-  if (paused) return;
   const seconds = Math.max(0, timing.clock_end - timing.now - Math.floor((performance.now() - receivedAt) / 1000));
   clock.textContent = displayDuration(seconds, board.dataset.boardHours === "1");
   clock.dateTime = `PT${seconds}S`;
@@ -30,7 +24,7 @@ function updateClock() {
 
 function renderTiming() {
   status.textContent = timing.status;
-  status.classList.remove("is-paused");
+  status.classList.remove("is-stale");
   query("[data-board-title]").textContent = timing.title;
   query("[data-board-schedule]").textContent = timing.schedule;
   query("[data-board-clock-label]").textContent = timing.clock_label;
@@ -125,15 +119,13 @@ function renderContent(markup, sameContest) {
 }
 
 async function refresh() {
-  if (paused || connection) return;
   const controller = new AbortController();
-  connection = controller;
   const deadline = setTimeout(() => controller.abort(), 7000);
   try {
     const response = await fetch(board.dataset.boardApi, { cache: "no-store", signal: controller.signal, headers: { Accept: "application/json" } });
     if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("Invalid update response");
     const next = await response.json();
-    if (paused || controller.signal.aborted) return;
+    if (controller.signal.aborted) return;
     const sameContest = timing.id === next.timing.id;
     timing = next.timing;
     receivedAt = performance.now();
@@ -141,47 +133,16 @@ async function refresh() {
     renderTiming();
     feedback.hidden = true;
   } catch {
-    if (!paused) {
-      status.textContent = "更新暂不可用";
-      status.classList.add("is-paused");
-      feedback.textContent = "暂时无法刷新，正在重试。";
-      feedback.hidden = false;
-    }
+    status.textContent = "更新暂不可用";
+    status.classList.add("is-stale");
+    feedback.textContent = "暂时无法刷新，正在重试。";
+    feedback.hidden = false;
   } finally {
     clearTimeout(deadline);
-    connection = null;
-    if (!paused) timer = setTimeout(refresh, pauseDelay);
+    setTimeout(refresh, refreshDelay);
   }
 }
 
-playback.addEventListener("click", () => {
-  paused = !paused;
-  playback.textContent = paused ? "继续" : "暂停";
-  if (paused) {
-    clearTimeout(timer);
-    connection?.abort();
-    cancelAnimationFrame(animationFrame);
-    for (const value of content.querySelectorAll("[data-sb-value]")) value.textContent = formatPoints.format(Number(value.dataset.sbValue));
-    status.textContent = "已暂停";
-    status.classList.add("is-paused");
-  } else {
-    refresh();
-  }
-});
-
-fullscreen.hidden = !document.fullscreenEnabled;
-fullscreen.addEventListener("click", async () => {
-  try {
-    if (document.fullscreenElement === board) await document.exitFullscreen();
-    else await board.requestFullscreen();
-  } catch {
-    feedback.textContent = "当前浏览器无法进入全屏。";
-    feedback.hidden = false;
-  }
-});
-document.addEventListener("fullscreenchange", () => {
-  fullscreen.textContent = document.fullscreenElement === board ? "退出全屏" : "全屏";
-});
 renderTiming();
 setInterval(updateClock, 500);
-timer = setTimeout(refresh, pauseDelay);
+setTimeout(refresh, refreshDelay);
