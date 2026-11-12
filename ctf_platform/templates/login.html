@@ -4,20 +4,10 @@
 <div class="arena-entry" data-login-presentation="{{ url_for('site.login_presentation') }}">
   <img class="arena-entry-image" src="{{ login_background }}" width="4096" height="2304" alt="塔里木大学与网络安全学院" fetchpriority="high">
   <main class="arena-entry-main">
-    <section class="arena-entry-intro" aria-labelledby="arena-entry-slogan">
-      <h1 id="arena-entry-slogan">
-        <span>筑牢边疆数字防线</span>
-        <span>锻造基层网安尖兵</span>
-      </h1>
-      <div class="arena-entry-event" data-login-event{% if not g.contest %} hidden{% endif %}>
-        <div class="arena-actions">
-          <strong data-event-title>{{ g.contest.title if g.contest else '' }}</strong>
-          <span class="arena-pill hero-status" data-event-status>{{ g.match.label if g.match else '' }}</span>
-        </div>
-        <p data-event-summary>{{ g.contest.summary if g.contest else '' }}</p>
-        <p data-event-schedule>{{ contest_schedule(g.contest) ~ ' · ' ~ timezone if g.contest else '' }}</p>
-      </div>
-    </section>
+    <h1 class="arena-entry-slogan" id="arena-entry-slogan">
+      <span>筑牢边疆数字防线</span>
+      <span>锻造基层网安尖兵</span>
+    </h1>
     <form class="arena-entry-form" action="{{ url_for('site.login') }}" method="post" aria-labelledby="arena-login-title">
       {{ ui.csrf() }}
       <header>
@@ -29,6 +19,14 @@
       {% if error %}<div class="arena-feedback error" role="alert">{{ error }}</div>{% endif %}
       <button class="arena-btn primary" type="submit">登录</button>
     </form>
+    <div class="arena-entry-event" data-login-event{% if not g.contest %} hidden{% endif %}>
+      <div class="arena-actions">
+        <strong data-event-title>{{ g.contest.title if g.contest else '' }}</strong>
+        <span class="arena-pill hero-status" data-event-status>{{ g.match.label if g.match else '' }}</span>
+      </div>
+      <p data-event-summary>{{ g.contest.summary if g.contest else '' }}</p>
+      <p data-event-schedule>{{ contest_schedule(g.contest) ~ ' · ' ~ timezone if g.contest else '' }}</p>
+    </div>
   </main>
 </div>
 {% endblock %}
