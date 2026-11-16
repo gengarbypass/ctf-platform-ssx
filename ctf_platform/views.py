@@ -10,7 +10,10 @@ from .domain import (
     CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, contest_schedule, contest_state, flag_digest, login_required,
     local_time, round_segments, text_field,
 )
-from .queries import flag_records, patch_records, puzzle_rankings, round_rankings, round_trend, score_records, service_matrix
+from .queries import (
+    flag_records, patch_player_rankings, patch_records, puzzle_player_rankings, puzzle_rankings,
+    round_rankings, round_trend, score_records, service_matrix,
+)
 from .storage import read_upload, save_upload, serve_upload
 
 
@@ -124,7 +127,7 @@ def puzzles():
                GROUP BY p.id ORDER BY p.category, p.points, p.id""",
             (g.team["id"] if g.team else None, g.contest["id"], category, category),
         ).fetchall()
-    return render_template("puzzles.html", title="解题题库", cards=cards, categories=CATEGORIES, category=category)
+    return render_template("puzzles.html", title="赛题", cards=cards, categories=CATEGORIES, category=category)
 
 
 def readable_task(mode, task_id):
@@ -339,15 +342,17 @@ def board_snapshot(kind):
     with transaction(get_db()) as db:
         contest = db.execute("SELECT * FROM contests WHERE active = 1 AND mode = ?", (kind,)).fetchone()
         state = contest_state(contest, now)
-        data = {"teams": [], "events": [], "matrix": None}
+        data = {"teams": [], "events": [], "players": [], "matrix": None}
         if contest:
             contest_id = contest["id"]
             if kind == "puzzle":
-                data.update(teams=puzzle_rankings(db, contest_id), events=flag_records(db, contest_id, accepted=True, limit=5))
+                data.update(teams=puzzle_rankings(db, contest_id), events=flag_records(db, contest_id, accepted=True, limit=5),
+                            players=puzzle_player_rankings(db, contest_id))
             else:
                 matrix = service_matrix(db, contest_id) if state["status"] != "upcoming" else None
                 data.update(teams=round_rankings(db, contest_id), matrix=matrix,
-                            events=score_records(db, contest_id, round_no=state["round"], limit=5))
+                            events=score_records(db, contest_id, round_no=state["round"], limit=5),
+                            players=patch_player_rankings(db, contest_id))
     clock_label, clock_end = "赛事未开启", now
     round_label = ""
     if state and kind == "round":

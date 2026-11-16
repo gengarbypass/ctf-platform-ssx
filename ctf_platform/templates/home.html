@@ -5,7 +5,7 @@
   {% if entry_mode == 'puzzle' and g.contest %}
     <nav class="arena-two arena-mode-grid" aria-label="赛场导航">
       <a class="arena-panel arena-mode-card" href="{{ url_for('site.puzzles') }}">
-        <div class="arena-mode-head"><span class="arena-icon-box">{{ ui.icon("flag") }}</span><div><h2>题库</h2><p>按分类查看赛题，提交 Flag。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
+        <div class="arena-mode-head"><span class="arena-icon-box">{{ ui.icon("flag") }}</span><div><h2>赛题</h2><p>按分类查看赛题，提交 Flag。</p></div><span class="arena-arrow">{{ ui.icon("next") }}</span></div>
         {% if metrics.puzzles is defined %}
         <div class="arena-mode-metrics"><span><strong>{{ metrics.puzzles }}</strong> 道赛题</span>{% if metrics.puzzle %}<span>已解 <strong>{{ metrics.puzzle.solved }}</strong> 道</span>{% endif %}</div>
         {% endif %}

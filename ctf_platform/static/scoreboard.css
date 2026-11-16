@@ -91,6 +91,7 @@
     & .sb-rank-panel .sb-table { height: 100%; }
     & .sb-round-layout { grid-template-columns: minmax(0,1.56fr) minmax(0,1fr); }
     & .sb-round-aside { display: grid; gap: 12px; min-width: 0; }
+    & .sb-aside { display: grid; gap: 12px; min-width: 0; align-content: start; }
     & .sb-table-frame { min-width: 0; max-width: 100%; overflow-x: auto; }
     & .sb-table { width: 100%; border-spacing: 0; border-collapse: separate; font-size: 12px; text-align: left; }
     & .sb-table th, & .sb-table td { padding: 8px 7px; border: 0; border-bottom: 1px solid #e1eaf7; color: inherit; }
@@ -106,6 +107,7 @@
     & .sb-table-round { min-width: 435px; }
     & .sb-table-round td { height: 43px; }
     & .sb-solve-count { white-space: nowrap; color: var(--sb-muted); font-size: 12px; }
+    & .sb-player-team { display: block; color: var(--sb-muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
     & .sb-feed-list { display: grid; min-width: 0; margin: 0; padding: 0 10px 3px; list-style: none; }
     & .sb-feed-item { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 4px 7px; padding: 6px 7px 6px 14px; border-bottom: 1px solid #e1eaf7; }
     & .sb-feed-item:last-child { border-bottom: 0; }
@@ -139,7 +141,7 @@
 
     @media (min-width: 1200px) {
       & .sb-hero { padding-block: 19px 22px; }
-      & .sb-grid, & .sb-podium, & .sb-round-aside { gap: 15px; }
+      & .sb-grid, & .sb-podium, & .sb-round-aside, & .sb-aside { gap: 15px; }
       & .sb-podium-card { min-height: 177px; }
       & .sb-podium-card.champion { min-height: 198px; }
       & .sb-podium-card .sb-name { font-size: 19px; }

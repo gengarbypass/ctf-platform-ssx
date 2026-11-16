@@ -33,6 +33,26 @@
     {% else %}<p class="sb-empty">暂无计分动态。</p>{% endif %}
   </section>
 {%- endmacro -%}
+{%- macro players(rows, puzzle) -%}
+  <section class="sb-panel"><header class="sb-panel-header"><h2>{{ '选手得分排行' if puzzle else '选手加固得分' }}</h2>{% if rows %}<small>TOP {{ rows|length }}</small>{% endif %}</header>
+    {% if rows %}
+      <div class="sb-table-frame"><table class="sb-table" aria-label="{{ '选手个人得分排行' if puzzle else '选手个人加固得分排行' }}">
+        <thead><tr><th scope="col">名次</th><th scope="col">选手</th><th scope="col">队伍</th>
+          {% if puzzle %}<th scope="col" class="sb-number-col">已解</th>{% else %}<th scope="col" class="sb-number-col">补丁</th>{% endif %}
+          <th scope="col" class="sb-number-col">积分</th><th scope="col" class="sb-number-col">名次变化</th>
+        </tr></thead>
+        <tbody>{% for player in rows %}<tr data-sb-player="{{ player.user_id }}-{{ player.team_id }}" data-sb-rank="{{ loop.index }}">
+          <td><span class="sb-rank">#{{ '%02d'|format(loop.index) }}</span></td>
+          <td><strong class="sb-name">{{ player.name }}</strong></td>
+          <td><span class="sb-player-team">{{ player.team_name }}</span></td>
+          {% if puzzle %}<td class="sb-number-col"><span class="sb-solve-count">{{ player.solved }} 题</span></td>
+          {% else %}<td class="sb-number-col"><span class="sb-solve-count">{{ player.patches }} 个</span></td>{% endif %}
+          <td class="sb-number-col">{{ score(player.points) }}</td><td class="sb-number-col">{{ shift() }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}<p class="sb-empty">暂无选手得分。</p>{% endif %}
+  </section>
+{%- endmacro -%}
 {% if timing.id is none %}
   <section class="sb-panel sb-empty-panel"><p class="sb-empty">当前没有开启的比赛。</p></section>
 {% elif kind == 'puzzle' %}
@@ -53,7 +73,10 @@
     <section class="sb-panel sb-rank-panel"><header class="sb-panel-header"><h2>其余队伍</h2></header>
       {% if board.teams|length > 3 %}{{ scores(board.teams[3:], true) }}{% else %}<p class="sb-empty">暂无其他队伍。</p>{% endif %}
     </section>
-    {{ feed(board.events, true) }}
+    <div class="sb-aside">
+      {{ players(board.players, true) }}
+      {{ feed(board.events, true) }}
+    </div>
   </div>
 {% else %}
   <div class="sb-grid sb-round-layout">
@@ -74,6 +97,7 @@
           <div class="sb-health-legend">{% for key,label in service_states.items() %}<span>{{ health(key,false) }}{{ label }}</span>{% endfor %}</div>
         {% else %}<p class="sb-empty">暂无服务状态。</p>{% endif %}
       </section>
+      {{ players(board.players, false) }}
       {{ feed(board.events, false) }}
     </div>
   </div>

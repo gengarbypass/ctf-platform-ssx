@@ -1,6 +1,9 @@
 from .domain import SCORE_KINDS
 
 
+PLAYER_BOARD_LIMIT = 10
+
+
 def puzzle_rankings(db, contest_id):
     return db.execute(
         """SELECT t.id, t.name, COUNT(f.id) AS solved, COALESCE(SUM(f.points), 0) AS points
@@ -8,6 +11,32 @@ def puzzle_rankings(db, contest_id):
            WHERE t.contest_id = ? GROUP BY t.id
            ORDER BY points DESC, t.name COLLATE NOCASE, t.id""",
         (contest_id,),
+    ).fetchall()
+
+
+def puzzle_player_rankings(db, contest_id):
+    return db.execute(
+        """SELECT f.user_id, t.id AS team_id, COALESCE(u.display_name, '已删除账号') AS name, t.name AS team_name,
+                  COUNT(f.id) AS solved, COALESCE(SUM(f.points), 0) AS points
+           FROM flag_submissions f JOIN teams t ON t.id = f.team_id LEFT JOIN users u ON u.id = f.user_id
+           WHERE f.contest_id = ? AND f.verdict = 'correct'
+           GROUP BY f.user_id, t.id
+           ORDER BY points DESC, solved DESC, name COLLATE NOCASE
+           LIMIT ?""",
+        (contest_id, PLAYER_BOARD_LIMIT),
+    ).fetchall()
+
+
+def patch_player_rankings(db, contest_id):
+    return db.execute(
+        """SELECT p.user_id, t.id AS team_id, COALESCE(u.display_name, '已删除账号') AS name, t.name AS team_name,
+                  COUNT(p.id) AS patches, COALESCE(SUM(p.award), 0) AS points
+           FROM patches p JOIN teams t ON t.id = p.team_id LEFT JOIN users u ON u.id = p.user_id
+           WHERE p.contest_id = ?
+           GROUP BY p.user_id, t.id
+           ORDER BY points DESC, patches DESC, name COLLATE NOCASE
+           LIMIT ?""",
+        (contest_id, PLAYER_BOARD_LIMIT),
     ).fetchall()
 
 

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  <div class="arena-back">{{ ui.link("返回题库", url_for('site.puzzles', category=puzzle.category), "link", "back") }}</div>
+  <div class="arena-back">{{ ui.link("返回赛题", url_for('site.puzzles', category=puzzle.category), "link", "back") }}</div>
   {% call ui.heading(puzzle.title, puzzle.category ~ ' · ' ~ puzzle.difficulty ~ ' · ' ~ puzzle.points ~ ' 分') %}
     {{ ui.pill("已解" if solved else "未解", "success" if solved else "neutral") }}
   {% endcall %}

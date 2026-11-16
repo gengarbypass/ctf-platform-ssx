@@ -30,19 +30,32 @@
         {% if admin %}
           {% set managed_mode = g.managed.mode if g.managed else 'puzzle' %}
           {% set teams_label = '队伍与服务' if managed_mode == 'round' else '队伍管理' %}
-          {% set items = [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题目管理','manage.challenges','/manage/challenges','list'),(teams_label,'manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
+          {% for label, endpoint, path, glyph in [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题目管理','manage.challenges','/manage/challenges','list'),(teams_label,'manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
+            {% set destination = url_for(endpoint, kind=managed_mode) if endpoint == 'manage.challenges' else url_for(endpoint) %}
+            {% set active = request.path == path if path in ['/', '/manage/'] else request.path.startswith(path) or (endpoint == 'manage.submissions' and request.path.startswith('/manage/patches')) %}
+            <a href="{{ destination }}"{% if active %} aria-current="page"{% endif %}>{{ ui.icon(glyph) }}{{ label }}</a>
+          {% endfor %}
         {% else %}
-          {% set items = [('比赛首页','site.home','/','home'),('解题赛','site.puzzle_home','/puzzle','flag'),('AWDP','site.awdp','/awdp','shield')] %}
-          {% if g.contest and request.endpoint != 'site.home' %}
-            {% if g.contest.mode == 'puzzle' %}{% set items = items + [('题库','site.puzzles','/challenges','list')] %}{% endif %}
-            {% set items = items + [('排行榜','site.ranking','/rankings','ranking'),('我的提交','site.records','/submissions','history')] %}
+          {% set entered = g.contest and request.endpoint != 'site.home' %}
+          <a href="{{ url_for('site.home') }}"{% if request.path == '/' %} aria-current="page"{% endif %}>{{ ui.icon('home') }}比赛首页</a>
+          <a href="{{ url_for('site.puzzle_home') }}"{{ ' aria-current="page"' if request.path == '/puzzle' }}{{ ' class="is-open"' if entered and g.contest.mode == 'puzzle' }}>{{ ui.icon('flag') }}解题赛</a>
+          {% if entered and g.contest.mode == 'puzzle' %}
+          <div class="arena-subnav">
+            <a href="{{ url_for('site.puzzles') }}"{% if request.path.startswith('/challenges') %} aria-current="page"{% endif %}>{{ ui.icon('list') }}赛题</a>
+            <a href="{{ url_for('site.ranking') }}"{% if request.path.startswith('/rankings') %} aria-current="page"{% endif %}>{{ ui.icon('ranking') }}排行榜</a>
+            <a href="{{ url_for('site.records') }}"{% if request.path.startswith('/submissions') %} aria-current="page"{% endif %}>{{ ui.icon('history') }}我的提交</a>
+          </div>
+          {% endif %}
+          {% set tasks_view = request.path == '/awdp' and request.args.get('view') == 'tasks' %}
+          <a href="{{ url_for('site.awdp') }}"{{ ' aria-current="page"' if request.path.startswith('/awdp') and not tasks_view }}{{ ' class="is-open"' if entered and g.contest.mode == 'round' }}>{{ ui.icon('shield') }}AWDP</a>
+          {% if entered and g.contest.mode == 'round' %}
+          <div class="arena-subnav">
+            <a href="{{ url_for('site.awdp', view='tasks') }}"{% if tasks_view %} aria-current="page"{% endif %}>{{ ui.icon('list') }}赛题</a>
+            <a href="{{ url_for('site.ranking') }}"{% if request.path.startswith('/rankings') %} aria-current="page"{% endif %}>{{ ui.icon('ranking') }}排行榜</a>
+            <a href="{{ url_for('site.records') }}"{% if request.path.startswith('/submissions') %} aria-current="page"{% endif %}>{{ ui.icon('history') }}我的提交</a>
+          </div>
           {% endif %}
         {% endif %}
-        {% for label, endpoint, path, glyph in items %}
-          {% set destination = url_for(endpoint, kind=managed_mode) if endpoint == 'manage.challenges' else url_for(endpoint) %}
-          {% set active = request.path == path if path in ['/', '/manage/'] else request.path.startswith(path) or (endpoint == 'manage.submissions' and request.path.startswith('/manage/patches')) %}
-          <a href="{{ destination }}"{% if active %} aria-current="page"{% endif %}>{{ ui.icon(glyph) }}{{ label }}</a>
-        {% endfor %}
       </nav>
       {% if admin and g.managed %}
       <a class="arena-scope" href="{{ url_for('manage.contests') }}"><small>当前编辑</small><strong>{{ g.managed.title }}</strong></a>

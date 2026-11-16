@@ -56,12 +56,14 @@ function updateRankShift(row, before, rank) {
   label.setAttribute("aria-label", `名次${delta > 0 ? "上升" : "下降"} ${Math.abs(delta)} 位`);
 }
 
+const rowKey = row => (row.dataset.sbTeam ? `t${row.dataset.sbTeam}` : `p${row.dataset.sbPlayer}`);
+
 function renderContent(markup, sameContest) {
   if (markup === contentMarkup && sameContest) return;
   contentMarkup = markup;
   cancelAnimationFrame(animationFrame);
-  const oldTeams = new Map(Array.from(content.querySelectorAll("[data-sb-team]"), row => [
-    row.dataset.sbTeam,
+  const oldTeams = new Map(Array.from(content.querySelectorAll("[data-sb-team],[data-sb-player]"), row => [
+    rowKey(row),
     { rect: row.getBoundingClientRect(), rank: Number(row.dataset.sbRank), points: Number(row.querySelector("[data-sb-value]").dataset.sbValue) },
   ]));
   const oldHealth = new Map(Array.from(content.querySelectorAll("[data-sb-service]"), cell => [cell.dataset.sbService, cell.dataset.sbHealth]));
@@ -70,8 +72,8 @@ function renderContent(markup, sameContest) {
   content.innerHTML = markup;
   if (!sameContest) return;
   const animated = [];
-  for (const row of content.querySelectorAll("[data-sb-team]")) {
-    const before = oldTeams.get(row.dataset.sbTeam);
+  for (const row of content.querySelectorAll("[data-sb-team],[data-sb-player]")) {
+    const before = oldTeams.get(rowKey(row));
     if (!before) continue;
     updateRankShift(row, before.rank, Number(row.dataset.sbRank));
     if (reduced.matches) continue;

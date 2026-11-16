@@ -167,6 +167,9 @@ class PlatformTest(unittest.TestCase):
         ranking = scoreboard["content"]
         self.assertIn('data-sb-value="200"', ranking)
         self.assertIn("已解 1 题", ranking)
+        self.assertIn("选手得分排行", ranking)
+        self.assertIn('data-sb-player="', ranking)
+        self.assertIn("bluefox", ranking)
         self.assertNotIn("flag{fixture}", ranking)
 
     def test_patch_review_score_reversal_status_and_file_access(self):
@@ -195,6 +198,7 @@ class PlatformTest(unittest.TestCase):
         board = player.get("/api/scoreboard/round").json["content"]
         self.assertIn('data-sb-value="35"', board)
         self.assertIn('data-sb-health="healthy"', board)
+        self.assertIn("选手加固得分", board)
         self.assertIn("复核退回", player.get("/submissions?kind=patch").get_data(as_text=True))
         for page in ("/awdp", "/awdp?view=teams", "/awdp?view=patches", "/awdp?view=tasks", f"/awdp/challenges/{task_id}"):
             self.assertEqual(player.get(page).status_code, 200, page)
@@ -255,6 +259,12 @@ class PlatformTest(unittest.TestCase):
         self.assertIn('href="/puzzle"', lobby.get_data(as_text=True))
         self.assertIn('href="/awdp"', lobby.get_data(as_text=True))
         self.assertEqual(player.get(download).status_code, 200)
+        puzzle_page = player.get("/puzzle").get_data(as_text=True)
+        self.assertIn("arena-subnav", puzzle_page)
+        self.assertIn("赛题", puzzle_page)
+        self.assertIn("排行榜", puzzle_page)
+        self.assertIn("我的提交", puzzle_page)
+        self.assertNotIn("题库", puzzle_page)
 
         round_contest = self.contest("蓝域杯 · 回合赛", mode="round", active=False)
         self.post(self.admin, f"/manage/contests/{puzzle_contest}/select")
@@ -278,8 +288,10 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, f"/manage/contests/{round_contest}/activate")
         self.assertEqual(self.lookup("SELECT id FROM contests WHERE active = 1")[0][0], round_contest)
         self.assertIn("回合赛", player.get("/").get_data(as_text=True))
+        self.assertIn("arena-subnav", player.get("/awdp").get_data(as_text=True))
         self.assertIn("档案检索新版", player.get(detail).get_data(as_text=True))
         self.assertNotIn("回合赛", player.get("/puzzle").get_data(as_text=True))
+        self.assertNotIn("arena-subnav", player.get("/puzzle").get_data(as_text=True))
         self.assertEqual(player.get(f"/challenges/{puzzle_id}").status_code, 404)
         self.assertEqual(player.get(download).status_code, 404)
         self.assertEqual(player.get("/rankings?kind=puzzle").status_code, 404)

@@ -363,6 +363,20 @@ body { margin: 0; background: #f2f5fb; }
   content: ""; position: absolute; width: 3px; top: 11px; bottom: 11px; left: -1px;
   border-radius: 0 3px 3px 0; background: var(--arena-blue);
 }
+#lanyu-arena .arena-nav a.is-open::after {
+  content: "▾"; margin-left: auto; color: var(--arena-muted); font-size: 10px; line-height: 1;
+}
+#lanyu-arena .arena-subnav {
+  position: relative; display: grid; gap: 3px; margin-top: -2px; padding-left: 15px;
+}
+#lanyu-arena .arena-subnav::before {
+  content: ""; position: absolute; top: 8px; bottom: 8px; left: 11px; width: 1.5px;
+  border-radius: 1px; background: var(--arena-border);
+}
+#lanyu-arena .arena-subnav a {
+  min-height: 31px; padding: 5px 8px; gap: 7px; font-size: 12px; border-radius: 7px;
+}
+#lanyu-arena .arena-subnav a .arena-icon { width: 13px; height: 13px; }
 #lanyu-arena .arena-scope {
   display: grid; gap: 2px; margin: 14px 4px; padding: 8px 9px; overflow-wrap: anywhere;
   border: 1px solid var(--arena-border); border-radius: 8px; background: var(--arena-bg); color: var(--arena-ink);
@@ -388,5 +402,6 @@ body { margin: 0; background: #f2f5fb; }
 
 @media (max-width: 560px) {
   #lanyu-arena .arena-nav a { min-height: 34px; padding: 5px 7px; font-size: 12px; gap: 4px; }
+  #lanyu-arena .arena-subnav { display: contents; }
   #lanyu-arena .arena-scope { display: none; }
 }
