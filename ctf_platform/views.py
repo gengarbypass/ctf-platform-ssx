@@ -11,8 +11,9 @@ from .domain import (
     local_time, round_segments, text_field,
 )
 from .queries import (
-    flag_records, patch_player_rankings, patch_records, puzzle_player_rankings, puzzle_rankings,
-    round_rankings, round_trend, score_records, service_matrix,
+    breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
+    patch_records, puzzle_player_rankings, puzzle_rankings, round_rankings, round_trend, score_records,
+    service_matrix,
 )
 from .storage import read_upload, save_upload, serve_upload
 
@@ -36,9 +37,9 @@ def scope_entry(mode):
 
 
 def records_kind(contest):
-    expected = "patch" if contest and contest["mode"] == "round" else "flag"
+    expected = {"puzzle": "flag", "round": "patch", "breach": "breach"}[contest["mode"]] if contest else "flag"
     kind = request.args.get("kind", expected)
-    if kind not in {"flag", "patch"} or (contest and kind != expected):
+    if kind not in {"flag", "patch", "breach"} or (contest and kind != expected):
         abort(404)
     return kind
 
@@ -164,7 +165,7 @@ def puzzle(puzzle_id):
     return render_template("puzzle.html", title=challenge["title"], puzzle=challenge, files=files, solves=solves, solved=solved, history=history, notice=notice)
 
 
-def submission_context(db, mode, task_id):
+def live_context(db, mode):
     now = int(time.time())
     contest = db.execute("SELECT * FROM contests WHERE active = 1").fetchone()
     if not contest or contest_state(contest, now)["status"] != "live":
@@ -178,6 +179,11 @@ def submission_context(db, mode, task_id):
     ).fetchone()
     if team is None:
         abort(403, "请先加入当前比赛的队伍。")
+    return contest, team, now
+
+
+def submission_context(db, mode, task_id):
+    contest, team, now = live_context(db, mode)
     table = CHALLENGE_TABLES[mode]
     task = db.execute(
         f"SELECT * FROM {table} WHERE id = ? AND contest_id = ? AND published = 1",
@@ -218,6 +224,78 @@ def submit_flag(puzzle_id):
         )
     session["flag_notice"] = {"puzzle_id": puzzle_id, "verdict": verdict, "points": points}
     return redirect(url_for("site.puzzle", puzzle_id=puzzle_id), code=303)
+
+
+@site.get("/breach")
+@login_required
+def breach():
+    scope_entry("breach")
+    data = {}
+    if g.contest and g.match["status"] != "upcoming":
+        db = get_db()
+        contest_id = g.contest["id"]
+        flags = db.execute(
+            """SELECT f.id, f.layer, f.title, f.description, f.points,
+                      COUNT(s.id) AS solves, MAX(CASE WHEN s.team_id = ? THEN 1 ELSE 0 END) AS solved
+               FROM breach_flags f LEFT JOIN breach_submissions s ON s.flag_id = f.id AND s.verdict = 'correct'
+               WHERE f.contest_id = ? AND f.published = 1
+               GROUP BY f.id
+               ORDER BY (SELECT MIN(x.id) FROM breach_flags x WHERE x.contest_id = f.contest_id AND x.layer = f.layer), f.id""",
+            (g.team["id"] if g.team else None, contest_id),
+        ).fetchall()
+        layers = []
+        for flag in flags:
+            if not layers or layers[-1]["name"] != flag["layer"]:
+                layers.append({"name": flag["layer"], "flags": []})
+            layers[-1]["flags"].append(flag)
+        data = {
+            "total": len(flags),
+            "layers": layers,
+            "mine": breach_records(db, contest_id, team_id=g.team["id"], limit=10) if g.team else [],
+            "standings": breach_rankings(db, contest_id),
+        }
+    notice = session.pop("breach_notice", None)
+    return render_template("breach.html", title="综合渗透", data=data, notice=notice)
+
+
+@site.post("/breach/flag")
+@login_required
+def submit_breach_flag():
+    value = text_field("flag", "Flag", 256)
+    db = get_db()
+    with transaction(db, write=True):
+        contest, team, now = live_context(db, "breach")
+        attempts = db.execute(
+            "SELECT COUNT(*) FROM breach_submissions WHERE contest_id = ? AND team_id = ? AND submitted_at >= ?",
+            (contest["id"], team["id"], now - 60),
+        ).fetchone()[0]
+        if attempts >= 30:
+            abort(429)
+        flags = db.execute(
+            "SELECT id, title, points, flag_salt, flag_digest FROM breach_flags WHERE contest_id = ? AND published = 1",
+            (contest["id"],),
+        ).fetchall()
+        match = next(
+            (row for row in flags if hmac.compare_digest(row["flag_digest"], flag_digest(row["flag_salt"], value))),
+            None,
+        )
+        prior = db.execute(
+            "SELECT 1 FROM breach_submissions WHERE flag_id = ? AND team_id = ? AND verdict = 'correct'",
+            (match["id"], team["id"]),
+        ).fetchone() if match else None
+        if match is None:
+            verdict, points, title = "incorrect", 0, ""
+        elif prior:
+            verdict, points, title = "already_solved", 0, match["title"]
+        else:
+            verdict, points, title = "correct", match["points"], match["title"]
+        db.execute(
+            """INSERT INTO breach_submissions (contest_id, flag_id, team_id, user_id, verdict, points, submitted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (contest["id"], match["id"] if match else None, team["id"], g.user["id"], verdict, points, now),
+        )
+    session["breach_notice"] = {"verdict": verdict, "points": points, "title": title}
+    return redirect(url_for("site.breach"), code=303)
 
 
 @site.get("/awdp")
@@ -283,7 +361,7 @@ def ranking():
         abort(404)
     standings = []
     if g.contest:
-        query = puzzle_rankings if kind == "puzzle" else round_rankings
+        query = {"puzzle": puzzle_rankings, "round": round_rankings, "breach": breach_rankings}[kind]
         standings = query(get_db(), g.contest["id"])
     return render_template("ranking.html", title="排行榜", standings=standings, kind=kind)
 
@@ -295,7 +373,7 @@ def records():
     page = page_number()
     rows = []
     if g.team and g.contest:
-        query = flag_records if kind == "flag" else patch_records
+        query = {"flag": flag_records, "patch": patch_records, "breach": breach_records}[kind]
         rows = query(get_db(), g.contest["id"], team_id=g.team["id"], limit=PAGE_SIZE + 1, offset=(page - 1) * PAGE_SIZE)
     return render_template("records.html", title="我的提交", kind=kind, rows=rows[:PAGE_SIZE], page=page, more=len(rows) > PAGE_SIZE, admin=False)
 
@@ -348,6 +426,9 @@ def board_snapshot(kind):
             if kind == "puzzle":
                 data.update(teams=puzzle_rankings(db, contest_id), events=flag_records(db, contest_id, accepted=True, limit=5),
                             players=puzzle_player_rankings(db, contest_id))
+            elif kind == "breach":
+                data.update(teams=breach_rankings(db, contest_id), events=breach_records(db, contest_id, accepted=True, limit=5),
+                            players=breach_player_rankings(db, contest_id))
             else:
                 matrix = service_matrix(db, contest_id) if state["status"] != "upcoming" else None
                 data.update(teams=round_rankings(db, contest_id), matrix=matrix,
@@ -363,7 +444,7 @@ def board_snapshot(kind):
             clock_label, clock_end = "距开赛", contest["start_at"]
         elif state["status"] == "finished":
             clock_label, clock_end = "比赛已结束", contest["end_at"]
-        elif kind == "puzzle":
+        elif kind != "round":
             clock_label, clock_end = "距比赛结束", contest["end_at"]
         else:
             clock_label, clock_end = "本回合剩余", state["round_end"]

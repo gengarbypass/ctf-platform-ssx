@@ -46,6 +46,13 @@
             <a href="{{ url_for('site.records') }}"{% if request.path.startswith('/submissions') %} aria-current="page"{% endif %}>{{ ui.icon('history') }}我的提交</a>
           </div>
           {% endif %}
+          <a href="{{ url_for('site.breach') }}"{{ ' aria-current="page"' if request.path.startswith('/breach') }}{{ ' class="is-open"' if entered and g.contest.mode == 'breach' }}>{{ ui.icon('code') }}综合渗透</a>
+          {% if entered and g.contest.mode == 'breach' %}
+          <div class="arena-subnav">
+            <a href="{{ url_for('site.ranking') }}"{% if request.path.startswith('/rankings') %} aria-current="page"{% endif %}>{{ ui.icon('ranking') }}排行榜</a>
+            <a href="{{ url_for('site.records') }}"{% if request.path.startswith('/submissions') %} aria-current="page"{% endif %}>{{ ui.icon('history') }}我的提交</a>
+          </div>
+          {% endif %}
           {% set tasks_view = request.path == '/awdp' and request.args.get('view') == 'tasks' %}
           <a href="{{ url_for('site.awdp') }}"{{ ' aria-current="page"' if request.path.startswith('/awdp') and not tasks_view }}{{ ' class="is-open"' if entered and g.contest.mode == 'round' }}>{{ ui.icon('shield') }}AWDP</a>
           {% if entered and g.contest.mode == 'round' %}

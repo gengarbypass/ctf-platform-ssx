@@ -9,7 +9,7 @@ from .domain import (
     CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, DIFFICULTIES, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError, admin_required,
     choice_field, contest_state, integer_field, new_flag, parse_local_time, text_field, username_value, validate_password,
 )
-from .queries import add_score, flag_records, patch_records, score_records, service_matrix
+from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix
 from .storage import read_upload, save_upload
 from .views import PAGE_SIZE, page_number, records_kind
 
@@ -112,7 +112,7 @@ def contest_edit(contest_id):
                 abort(404)
             if contest["active"] and mode != contest["mode"]:
                 raise FormError("请先撤下比赛，再修改比赛模式。")
-            if mode == "puzzle":
+            if mode != "round":
                 round_seconds = contest["round_seconds"]
             last_round = db.execute("SELECT MAX(round_no) FROM score_events WHERE contest_id = ?", (contest_id,)).fetchone()[0]
             if last_round and (
@@ -406,10 +406,11 @@ def challenge_edit(kind, task_id):
             """SELECT f.id, f.name FROM puzzle_files a JOIN uploads f ON f.id = a.file_id WHERE a.puzzle_id = ?""",
             (task_id,),
         ).fetchall() if task and kind == "puzzle" else []
-        return render_template("manage/challenge_form.html", title="编辑赛题" if task else "创建赛题", task=task,
+        unit = "靶点" if kind == "breach" else "赛题"
+        return render_template("manage/challenge_form.html", title=f"编辑{unit}" if task else f"创建{unit}", task=task,
                                kind=kind, files=files, categories=CATEGORIES, difficulties=DIFFICULTIES)
     title = text_field("title", "题目名称", 100)
-    description = text_field("description", "题目说明", 16000)
+    description = text_field("description", "题目说明", 16000, optional=kind == "breach")
     published = request.form.get("published") == "1"
     if kind == "puzzle":
         category = choice_field("category", "分类", CATEGORIES)
@@ -438,6 +439,26 @@ def challenge_edit(kind, task_id):
                 db.execute("DELETE FROM puzzle_files WHERE puzzle_id = ? AND file_id = ?", (task_id, file_id))
             for upload in uploads:
                 db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
+    elif kind == "breach":
+        layer = text_field("layer", "所属层级", 40)
+        points = integer_field("points", "分值", 1, 100_000)
+        flag = text_field("flag", "Flag", 256, optional=task is not None)
+        salt_and_digest = new_flag(flag) if flag else None
+        with transaction(db, write=True):
+            managed_id(kind)
+            if task:
+                if salt_and_digest:
+                    db.execute("UPDATE breach_flags SET flag_salt = ?, flag_digest = ? WHERE id = ?", (*salt_and_digest, task_id))
+                db.execute(
+                    """UPDATE breach_flags SET title = ?, layer = ?, description = ?, points = ?, published = ?
+                       WHERE id = ? AND contest_id = ?""", (title, layer, description, points, published, task_id, contest_id),
+                )
+            else:
+                task_id = db.execute(
+                    """INSERT INTO breach_flags (contest_id, title, layer, description, points, flag_salt, flag_digest, published)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (contest_id, title, layer, description, points, *salt_and_digest, published),
+                ).lastrowid
     else:
         baseline = text_field("baseline", "基线版本", 80)
         with transaction(db, write=True):
@@ -508,7 +529,7 @@ def submissions():
     page = page_number()
     records = []
     if g.managed:
-        query = flag_records if kind == "flag" else patch_records
+        query = {"flag": flag_records, "patch": patch_records, "breach": breach_records}[kind]
         records = query(get_db(), g.managed["id"], limit=PAGE_SIZE + 1, offset=(page - 1) * PAGE_SIZE)
     return render_template("records.html", title="提交管理", kind=kind, rows=records[:PAGE_SIZE], page=page,
                            more=len(records) > PAGE_SIZE, admin=True)

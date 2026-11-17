@@ -1,24 +1,32 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
+  {% set unit = '靶点' if kind == 'breach' else '赛题' %}
   {% call ui.heading("题目管理", g.managed.title ~ " · " ~ contest_modes[kind] if g.managed else "创建比赛后即可配置题库。") %}
     {% if g.managed %}
       {% if not g.managed.active %}{{ ui.pill("未开启 · 筹备中", "neutral") }}{% endif %}
-      {{ ui.link("创建赛题", url_for('manage.challenge_edit',kind=kind), "primary", "plus") }}
+      {{ ui.link("创建" ~ unit, url_for('manage.challenge_edit',kind=kind), "primary", "plus") }}
     {% else %}
       {{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}
     {% endif %}
   {% endcall %}
   {% set open = g.managed and g.managed.active and contest_state(g.managed,g.now).status != 'upcoming' %}
-  {% call ui.panel("解题题库" if kind == 'puzzle' else "攻防赛题") %}
+  {% call ui.panel("解题题库" if kind == 'puzzle' else "攻防赛题" if kind == 'round' else "渗透靶点") %}
     {% if rows %}
-    <div class="arena-table-wrap"><table class="arena-table"><caption>赛题管理</caption>
-      <thead><tr><th scope="col">题目</th>{% if kind == 'puzzle' %}<th scope="col">分类</th><th scope="col">分值</th>{% else %}<th scope="col">基线版本</th>{% endif %}<th scope="col">发布状态</th><th scope="col">操作</th></tr></thead>
+    <div class="arena-table-wrap"><table class="arena-table"><caption>{{ unit }}管理</caption>
+      <thead><tr><th scope="col">题目</th>
+        {% if kind == 'puzzle' %}<th scope="col">分类</th><th scope="col">分值</th>
+        {% elif kind == 'breach' %}<th scope="col">层级</th><th scope="col">分值</th>
+        {% else %}<th scope="col">基线版本</th>{% endif %}
+        <th scope="col">发布状态</th><th scope="col">操作</th></tr></thead>
       <tbody>{% for row in rows %}<tr>
-        <td><strong>{{ row.title }}</strong></td>{% if kind == 'puzzle' %}<td>{{ row.category }}</td><td>{{ row.points }}</td>{% else %}<td class="arena-mono">{{ row.baseline }}</td>{% endif %}
+        <td><strong>{{ row.title }}</strong></td>
+        {% if kind == 'puzzle' %}<td>{{ row.category }}</td><td>{{ row.points }}</td>
+        {% elif kind == 'breach' %}<td>{{ row.layer }}</td><td>{{ row.points }}</td>
+        {% else %}<td class="arena-mono">{{ row.baseline }}</td>{% endif %}
         <td>{{ ui.pill(("已开放" if open else "待开放") if row.published else "草稿","success" if row.published and open else "neutral") }}</td><td>{{ ui.link("编辑",url_for('manage.challenge_edit',kind=kind,task_id=row.id),"link") }}</td>
       </tr>{% endfor %}</tbody>
     </table></div>
-    {% else %}{{ ui.empty("暂无赛题。") }}{% endif %}
+    {% else %}{{ ui.empty("暂无" ~ unit ~ "。") }}{% endif %}
   {% endcall %}
 {% endblock %}

@@ -8,12 +8,12 @@
     {% if standings %}
     <div class="arena-table-wrap"><table class="arena-table"><caption>队伍排名</caption>
       <thead><tr><th scope="col">名次</th><th scope="col">队伍</th>
-        {% if kind == 'puzzle' %}<th scope="col">已解题目</th>{% else %}<th scope="col">攻防</th><th scope="col">加固</th><th scope="col">可用性</th>{% endif %}<th scope="col">积分</th>
+        {% if kind == 'puzzle' %}<th scope="col">已解题目</th>{% elif kind == 'breach' %}<th scope="col">已获 Flag</th>{% else %}<th scope="col">攻防</th><th scope="col">加固</th><th scope="col">可用性</th>{% endif %}<th scope="col">积分</th>
       </tr></thead>
       <tbody>{% for row in standings %}<tr{% if g.team and row.id == g.team.id %} class="arena-ours"{% endif %}>
         <td><span class="arena-rank {{ 'leading' if loop.index <= 3 else '' }}">{{ loop.index }}</span></td>
         <td><span class="arena-team">{{ row.name }}{% if g.team and row.id == g.team.id %}<small>本队</small>{% endif %}</span></td>
-        {% if kind == 'puzzle' %}<td>{{ row.solved }} 道</td>{% else %}<td>{{ row.attack }}</td><td>{{ row.defense }}</td><td>{{ row.uptime }}</td>{% endif %}
+        {% if kind == 'puzzle' %}<td>{{ row.solved }} 道</td>{% elif kind == 'breach' %}<td>{{ row.solved }} 个</td>{% else %}<td>{{ row.attack }}</td><td>{{ row.defense }}</td><td>{{ row.uptime }}</td>{% endif %}
         <td class="arena-score arena-number">{{ '{:,}'.format(row.points) }}</td>
       </tr>{% endfor %}</tbody>
     </table></div>

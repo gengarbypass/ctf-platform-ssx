@@ -54,21 +54,9 @@
     & .sb-panel-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 3px 7px; padding: 11px 13px 9px; }
     & .sb-panel-header h2 { font-size: 15px; line-height: 1.3; font-weight: 740; }
     & .sb-panel-header small { color: var(--sb-muted); font-size: 11px; }
-    & .sb-podium-stage { padding-top: 9px; }
-    & .sb-podium-stage > .sb-panel-header { padding: 6px 0 7px; }
-    & .sb-podium { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); align-items: end; gap: 10px; }
-    & .sb-podium-card { position: relative; isolation: isolate; display: grid; justify-items: center; align-content: center; min-width: 0; min-height: 157px; gap: 4px; padding: 12px 7px 10px; border: 1px solid #c6d8f6; border-radius: 11px; background: radial-gradient(ellipse at 50% -2%,#e5efff 0%,transparent 70%), linear-gradient(175deg,#f7faff,#ffffff); box-shadow: 0 4px 15px #2f5c9f0e; }
-    & .sb-podium-card::before { content: ""; position: absolute; z-index: -1; inset: 0 0 auto; height: 65px; border-radius: 10px 10px 0 0; opacity: .62; background: repeating-linear-gradient(142deg,#81a8ef2e 0 1px,transparent 1px 17px); mask-image: linear-gradient(0deg,transparent,#000); }
-    & .sb-podium-card.champion { min-height: 174px; border-color: #83abf4; background: radial-gradient(ellipse at 50% 9%,#d1e3ff 0%,transparent 65%), linear-gradient(171deg,#ecf5ff,#ffffff 84%); box-shadow: 0 4px 19px #3268cb21; }
-    & .sb-podium-card.champion::after { content: ""; position: absolute; top: -1px; left: 19%; right: 19%; height: 2px; border-radius: 4px; background: #6093f2; box-shadow: 0 0 12px #6fa7ff9e; }
-    & .sb-podium-meta { position: absolute; top: 10px; left: 9px; right: 9px; display: flex; justify-content: space-between; align-items: center; gap: 4px; }
     & .sb-rank { color: var(--sb-blue-ink); font: 720 12px/1.25 var(--sb-num); white-space: nowrap; }
     & .sb-rank-badge { display: inline-flex; align-items: center; gap: 5px; }
     & .sb-name { color: var(--sb-ink); min-width: 0; overflow-wrap: anywhere; font-size: 15px; font-weight: 740; line-height: 1.23; }
-    & .sb-podium-card .sb-name { text-align: center; }
-    & .sb-podium-score { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; column-gap: 4px; }
-    & .sb-podium-score b { color: var(--sb-blue-ink); font: 750 clamp(20px,3.1vw,34px)/1.08 var(--sb-num); letter-spacing: -.035em; }
-    & .sb-podium-score small, & .sb-podium-solved { color: var(--sb-muted); font-size: 11px; }
     & .sb-shift { flex: 0 0 auto; color: #576c8b; font: 650 11px/1.3 var(--sb-num); white-space: nowrap; }
     & .sb-shift.gain, & .sb-delta.gain { color: var(--sb-blue-ink); }
     & .sb-shift.loss, & .sb-delta.loss { color: #9a3851; }
@@ -86,12 +74,24 @@
     & .sb-cup::after { content: ""; position: absolute; z-index: 0; top: 12%; left: 5%; width: 90%; height: 41%; border: 1.5px solid var(--medal-edge); border-radius: 2px 2px 7px 7px; }
     & .sb-cup i { position: absolute; top: 52%; left: 45%; width: 10%; height: 31%; background: var(--medal-edge); }
     & .sb-cup b { position: absolute; bottom: 8%; left: 28%; width: 44%; height: 9%; border-radius: 2px; background: var(--medal-edge); }
-    & .sb-grid { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(0,1fr); gap: 12px; margin-top: 12px; }
+    & .sb-split { display: grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); grid-template-rows: minmax(0,1fr); gap: 15px; margin-top: 15px; align-items: stretch; flex: 1; min-height: 0; }
+    & .sb-split > * { min-height: 0; }
     & .sb-rank-panel { display: grid; grid-template-rows: auto minmax(0,1fr); }
-    & .sb-rank-panel .sb-table { height: 100%; }
-    & .sb-round-layout { grid-template-columns: minmax(0,1.56fr) minmax(0,1fr); }
-    & .sb-round-aside { display: grid; gap: 12px; min-width: 0; }
-    & .sb-aside { display: grid; gap: 12px; min-width: 0; align-content: start; }
+    & .sb-rank-panel .sb-table-frame { overflow-y: auto; min-height: 0; }
+    & .sb-split-aside { display: grid; grid-template-rows: minmax(0,1fr) minmax(0,1fr); gap: 15px; min-width: 0; }
+    & .sb-split-aside .sb-panel { display: grid; grid-template-rows: auto minmax(0,1fr); min-height: 0; overflow: hidden; }
+    & .sb-split-aside .sb-table-frame { overflow-y: auto; min-height: 0; }
+    & .sb-split-aside .sb-feed-list { overflow-y: auto; }
+    & .sb-split .sb-table td { height: 48px; }
+    & .sb-split .sb-table .sb-name { font-size: 15px; }
+    & .sb-split .sb-table [data-sb-value] { font-size: 17px; }
+    & .sb-split .sb-table th { font-size: 12px; }
+    & .sb-split .sb-table tr.is-leading td:first-child { box-shadow: inset 3px 0 0 var(--sb-blue); }
+    & .sb-split .sb-rank-badge .sb-trophy { width: 37px; height: 37px; }
+    & .sb-split .sb-rank-badge .sb-cup { width: 21px; height: 21px; }
+    & .sb-split .sb-rank-badge .sb-rank { font-size: 13px; }
+    & .sb-matrix-panel { flex: 0 0 auto; margin-top: 15px; max-height: 34vh; display: grid; grid-template-rows: auto minmax(0,1fr) auto; }
+    & .sb-matrix-panel .sb-table-frame { overflow: auto; min-height: 0; }
     & .sb-table-frame { min-width: 0; max-width: 100%; overflow-x: auto; }
     & .sb-table { width: 100%; border-spacing: 0; border-collapse: separate; font-size: 12px; text-align: left; }
     & .sb-table th, & .sb-table td { padding: 8px 7px; border: 0; border-bottom: 1px solid #e1eaf7; color: inherit; }
@@ -105,7 +105,6 @@
     & .sb-table .sb-name { font-size: 13px; }
     & .sb-table [data-sb-value] { color: var(--sb-blue-ink); font: 740 15px/1.25 var(--sb-num); }
     & .sb-table-round { min-width: 435px; }
-    & .sb-table-round td { height: 43px; }
     & .sb-solve-count { white-space: nowrap; color: var(--sb-muted); font-size: 12px; }
     & .sb-player-team { display: block; color: var(--sb-muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
     & .sb-feed-list { display: grid; min-width: 0; margin: 0; padding: 0 10px 3px; list-style: none; }
@@ -141,27 +140,23 @@
 
     @media (min-width: 1200px) {
       & .sb-hero { padding-block: 19px 22px; }
-      & .sb-grid, & .sb-podium, & .sb-round-aside, & .sb-aside { gap: 15px; }
-      & .sb-podium-card { min-height: 177px; }
-      & .sb-podium-card.champion { min-height: 198px; }
-      & .sb-podium-card .sb-name { font-size: 19px; }
-      & .sb-table-round td { height: 50px; }
+      & .sb-split, & .sb-split-aside { gap: 15px; }
       & .sb-panel-header { padding: 13px 15px 11px; }
       & .sb-panel-header h2 { font-size: 17px; }
       & .sb-feed-item { padding-block: 8px; }
     }
-    @media (max-width: 835px) {
-      & .sb-round-layout { grid-template-columns: minmax(0,1fr); }
-      & .sb-round-aside { grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; }
+    @media (max-width: 1100px) {
+      & { height: auto; }
+      & .sb-split { grid-template-columns: minmax(0,1fr); flex: none; }
+      & .sb-split-aside { grid-template-rows: none; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; }
+      & .sb-split-aside .sb-panel { overflow: visible; }
+      & .sb-split-aside .sb-table-frame, & .sb-split-aside .sb-feed-list { overflow-y: visible; }
+      & .sb-rank-panel .sb-table-frame { overflow-y: visible; }
+      & .sb-matrix-panel { max-height: none; }
     }
     @media (max-width: 615px) {
-      & .sb-grid, & .sb-round-aside { grid-template-columns: minmax(0,1fr); }
+      & .sb-split, & .sb-split-aside { grid-template-columns: minmax(0,1fr); }
       & .sb-hero { flex-wrap: wrap; align-items: start; gap: 7px; }
-      & .sb-podium { gap: 5px; }
-      & .sb-podium-card { min-height: 141px; padding: 26px 4px 7px; }
-      & .sb-podium-card.champion { min-height: 154px; }
-      & .sb-podium-card .sb-name { font-size: 12px; }
-      & .sb-podium-meta { left: 4px; right: 4px; top: 7px; }
       & .sb-trophy { width: 37px; height: 37px; }
       & .sb-trophy > svg, & .sb-cup { width: 22px; height: 22px; }
       & .sb-round-panel { gap: 7px; grid-template-columns: minmax(0,1fr) auto; }
@@ -172,9 +167,10 @@
   }
 
 #lanyu-arena #ctf-scoreboard {
-  min-height: 100vh;
+  display: flex; flex-direction: column; height: 100vh; min-height: 100vh;
+  & .sb-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  & [data-board-content] { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   & .sb-empty { margin: 0; padding: 15px 13px; color: var(--sb-muted); font-size: 12px; }
   & .sb-empty-panel { margin-top: 12px; }
   & .sb-health-chip.unknown { color: #586d8d; background: #edf1f8; }
-  & .sb-podium-card.is-changed { border-color: #6597ed; }
 }

@@ -10,10 +10,10 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
-    "round_tasks", "service_states", "patches", "score_events",
+    "breach_flags", "breach_submissions", "round_tasks", "service_states", "patches", "score_events",
 )
 
 
@@ -61,7 +61,12 @@ def schema_statements():
 
 
 def rebuild_tables(connection, schema):
-    for table in REBUILT_TABLES:
+    # Older databases may predate some tables introduced by newer schema versions.
+    legacy = [
+        table for table in REBUILT_TABLES
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone()
+    ]
+    for table in legacy:
         connection.execute(f"ALTER TABLE {table} RENAME TO {table}_legacy")
     for statement in schema:
         connection.execute(statement)
@@ -75,10 +80,10 @@ def rebuild_tables(connection, schema):
                   c.cover_id, c.active, c.created_at
            FROM contests_legacy c"""
     )
-    for table in REBUILT_TABLES[1:]:
+    for table in legacy[1:]:
         columns = ", ".join(row["name"] for row in connection.execute(f"PRAGMA table_info({table})"))
         connection.execute(f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {table}_legacy")
-    for table in reversed(REBUILT_TABLES):
+    for table in reversed(legacy):
         connection.execute(f"DROP TABLE {table}_legacy")
     # Recreate indexes whose names were still in use by the old tables.
     for statement in schema:

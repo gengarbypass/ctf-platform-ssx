@@ -40,6 +40,41 @@ def patch_player_rankings(db, contest_id):
     ).fetchall()
 
 
+def breach_rankings(db, contest_id):
+    return db.execute(
+        """SELECT t.id, t.name, COUNT(b.id) AS solved, COALESCE(SUM(b.points), 0) AS points
+           FROM teams t LEFT JOIN breach_submissions b ON b.contest_id = t.contest_id AND b.team_id = t.id AND b.verdict = 'correct'
+           WHERE t.contest_id = ? GROUP BY t.id
+           ORDER BY points DESC, solved DESC, t.name COLLATE NOCASE, t.id""",
+        (contest_id,),
+    ).fetchall()
+
+
+def breach_player_rankings(db, contest_id):
+    return db.execute(
+        """SELECT b.user_id, t.id AS team_id, COALESCE(u.display_name, '已删除账号') AS name, t.name AS team_name,
+                  COUNT(b.id) AS solved, COALESCE(SUM(b.points), 0) AS points
+           FROM breach_submissions b JOIN teams t ON t.id = b.team_id LEFT JOIN users u ON u.id = b.user_id
+           WHERE b.contest_id = ? AND b.verdict = 'correct'
+           GROUP BY b.user_id, t.id
+           ORDER BY points DESC, solved DESC, name COLLATE NOCASE
+           LIMIT ?""",
+        (contest_id, PLAYER_BOARD_LIMIT),
+    ).fetchall()
+
+
+def breach_records(db, contest_id, *, team_id=None, flag_id=None, accepted=False, limit=50, offset=0):
+    return db.execute(
+        """SELECT s.*, COALESCE(f.title, '未匹配靶点') AS title, t.name AS team_name,
+                  COALESCE(u.display_name, '已删除账号') AS display_name
+           FROM breach_submissions s LEFT JOIN breach_flags f ON f.id = s.flag_id
+           JOIN teams t ON t.id = s.team_id LEFT JOIN users u ON u.id = s.user_id
+           WHERE s.contest_id = ? AND (? IS NULL OR s.team_id = ?) AND (? IS NULL OR s.flag_id = ?)
+           AND (? = 0 OR s.verdict = 'correct') ORDER BY s.id DESC LIMIT ? OFFSET ?""",
+        (contest_id, team_id, team_id, flag_id, flag_id, accepted, limit, offset),
+    ).fetchall()
+
+
 def round_rankings(db, contest_id):
     return db.execute(
         """SELECT t.id, t.name,

@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS contests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     summary TEXT NOT NULL,
-    mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round')),
+    mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round', 'breach')),
     start_at INTEGER NOT NULL,
     end_at INTEGER NOT NULL CHECK (end_at > start_at),
     round_seconds INTEGER CHECK (round_seconds > 0),
@@ -108,6 +108,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_flag_award ON flag_submissions(puzzle_id, 
 CREATE INDEX IF NOT EXISTS flags_team ON flag_submissions(contest_id, team_id, id DESC);
 CREATE INDEX IF NOT EXISTS flags_team_recent ON flag_submissions(contest_id, team_id, submitted_at);
 CREATE INDEX IF NOT EXISTS flags_contest ON flag_submissions(contest_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS breach_flags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+    layer TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    points INTEGER NOT NULL CHECK (points > 0),
+    flag_salt TEXT NOT NULL,
+    flag_digest TEXT NOT NULL,
+    published INTEGER NOT NULL DEFAULT 0 CHECK (published IN (0, 1)),
+    UNIQUE (contest_id, id)
+);
+CREATE INDEX IF NOT EXISTS breach_flags_listing ON breach_flags(contest_id, published, layer);
+
+CREATE TABLE IF NOT EXISTS breach_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest_id INTEGER NOT NULL,
+    flag_id INTEGER,
+    team_id INTEGER NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('correct', 'incorrect', 'already_solved')),
+    points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
+    submitted_at INTEGER NOT NULL,
+    FOREIGN KEY (contest_id, flag_id) REFERENCES breach_flags(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_breach_award ON breach_submissions(flag_id, team_id) WHERE verdict = 'correct';
+CREATE INDEX IF NOT EXISTS breach_team ON breach_submissions(contest_id, team_id, id DESC);
+CREATE INDEX IF NOT EXISTS breach_team_recent ON breach_submissions(contest_id, team_id, submitted_at);
+CREATE INDEX IF NOT EXISTS breach_contest ON breach_submissions(contest_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS round_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -99,6 +99,14 @@ class PlatformTest(unittest.TestCase):
                   baseline="v1.0", description="记录服务状态与加固说明。", published="1")
         return self.lookup("SELECT id FROM round_tasks WHERE contest_id = ?", (contest_id,))[0][0]
 
+    def breach_flag(self, contest_id, title, layer, flag, *, points=100, description="", published="1"):
+        data = {"contest_id": contest_id, "title": title, "layer": layer, "points": points,
+                "flag": flag, "description": description, "published": published}
+        if published is None:
+            del data["published"]
+        self.post(self.admin, "/manage/challenges/breach/new", **data)
+        return self.lookup("SELECT id FROM breach_flags WHERE contest_id = ?", (contest_id,))[-1][0]
+
     def test_login_stays_the_same_when_active_contest_changes(self):
         public = self.app.test_client()
         self.assertEqual(public.get("/healthz").json, {"status": "ok"})
@@ -166,7 +174,8 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(scoreboard["timing"]["segments"], [])
         ranking = scoreboard["content"]
         self.assertIn('data-sb-value="200"', ranking)
-        self.assertIn("已解 1 题", ranking)
+        self.assertIn("金色奖杯", ranking)
+        self.assertIn("1 题", ranking)
         self.assertIn("选手得分排行", ranking)
         self.assertIn('data-sb-player="', ranking)
         self.assertIn("bluefox", ranking)
@@ -203,6 +212,81 @@ class PlatformTest(unittest.TestCase):
         for page in ("/awdp", "/awdp?view=teams", "/awdp?view=patches", "/awdp?view=tasks", f"/awdp/challenges/{task_id}"):
             self.assertEqual(player.get(page).status_code, 200, page)
 
+    def test_breach_range_layered_flags_and_auto_match_scoring(self):
+        contest_id = self.contest("蓝域杯 · 综合渗透赛", mode="breach")
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        teammate = self.login("bluefox")
+        other, _ = self.player(contest_id, "packetlab", "PacketLab")
+        self.breach_flag(contest_id, "F1 备份泄露", "边界突破", "flag{agri_f1}", points=100, description="robots 与备份目录")
+        self.breach_flag(contest_id, "F3 上传 Getshell", "边界突破", "flag{agri_f3}", points=150)
+        third = self.breach_flag(contest_id, "F5 拖库", "内网渗透", "flag{agri_f5}", points=300)
+        self.breach_flag(contest_id, "F8 痕迹取证", "内网渗透", "flag{agri_f8}", points=400, published=None)
+
+        page = player.get("/breach").get_data(as_text=True)
+        self.assertIn("边界突破", page)
+        self.assertIn("内网渗透", page)
+        self.assertIn("F1 备份泄露", page)
+        self.assertIn("robots 与备份目录", page)
+        self.assertIn("0 / 3", page)
+        self.assertNotIn("F8 痕迹取证", page)
+
+        wrong = self.post(player, "/breach/flag", flag="flag{nope}", follow=True, code=200)
+        self.assertIn("Flag 错误", wrong.get_data(as_text=True))
+
+        # 正确提交按靶点分值计分，且不要求按环节顺序（自动匹配）
+        hit = self.post(player, "/breach/flag", flag="flag{agri_f3}", follow=True, code=200)
+        self.assertIn("Flag 正确", hit.get_data(as_text=True))
+        self.assertIn("本队获得 150 分", hit.get_data(as_text=True))
+        # 草稿靶点的 flag 不可匹配
+        hidden = self.post(player, "/breach/flag", flag="flag{agri_f8}", follow=True, code=200)
+        self.assertIn("Flag 错误", hidden.get_data(as_text=True))
+        # 同队重复提交（含队友）不重复计分
+        repeat = self.post(teammate, "/breach/flag", flag="flag{agri_f3}", follow=True, code=200)
+        self.assertIn("该 Flag 已提交", repeat.get_data(as_text=True))
+        self.post(player, "/breach/flag", flag="flag{agri_f1}", follow=True, code=200)
+        # 其他队伍独立计分
+        self.post(other, "/breach/flag", flag="flag{agri_f5}", follow=True, code=200)
+        awards = self.lookup("SELECT verdict, points FROM breach_submissions WHERE team_id = ? ORDER BY id", (team_id,))
+        self.assertEqual([tuple(row) for row in awards],
+                         [("incorrect", 0), ("correct", 150), ("incorrect", 0), ("already_solved", 0), ("correct", 100)])
+        self.assertIn("2 / 3", player.get("/breach").get_data(as_text=True))
+
+        board = player.get("/api/scoreboard/breach").json
+        self.assertEqual(board["timing"]["round_label"], "")
+        content = board["content"]
+        self.assertIn("突破动态", content)
+        self.assertIn("队伍排名", content)
+        self.assertIn("选手得分排行", content)
+        self.assertIn('data-sb-value="250"', content)
+        self.assertIn('data-sb-value="300"', content)
+        self.assertNotIn("flag{agri_f1}", content)
+
+        self.assertIn("F3 上传 Getshell", player.get("/submissions").get_data(as_text=True))
+        self.assertIn("未匹配靶点", self.admin.get("/manage/submissions").get_data(as_text=True))
+        self.assertIn("F5 拖库", self.admin.get("/manage/challenges/breach").get_data(as_text=True))
+
+        # 编辑靶点不重置 flag，仅调整分值与说明
+        self.post(self.admin, f"/manage/challenges/breach/{third}/edit", contest_id=contest_id, title="F5 拖库",
+                  layer="内网渗透", points=350, description="设备台账与拓扑", published="1")
+        still = self.post(other, "/breach/flag", flag="flag{agri_f5}", follow=True, code=200)
+        self.assertIn("该 Flag 已提交", still.get_data(as_text=True))
+
+        # 与其他模式互不可见
+        self.assertEqual(player.get("/challenges").status_code, 404)
+        self.assertEqual(player.get("/rankings?kind=puzzle").status_code, 404)
+        self.assertEqual(player.get("/submissions?kind=flag").status_code, 404)
+        lobby = player.get("/puzzle").get_data(as_text=True)
+        self.assertNotIn("arena-subnav", lobby)
+        arena = player.get("/awdp").get_data(as_text=True)
+        self.assertNotIn("综合渗透赛", arena)
+
+        # 未开赛的靶场不可提交
+        self.contest("蓝域杯 · 渗透预赛", mode="breach", upcoming=True)
+        self.post(player, "/breach/flag", code=403, flag="flag{agri_f1}")
+        waiting = player.get("/breach").get_data(as_text=True)
+        self.assertIn("渗透预赛", waiting)
+        self.assertNotIn("F1 备份泄露", waiting)
+
     def test_scheduled_access_and_persistence(self):
         contest_id = self.contest(upcoming=True)
         player, _ = self.player(contest_id, "bluefox", "BlueFox")
@@ -236,10 +320,14 @@ class PlatformTest(unittest.TestCase):
             self.assertNotIn("AWDP", page)
             self.assertNotIn("<button", page)
             self.assertNotIn("<a ", page)
+            self.assertNotIn("Asia/Shanghai", page)
+            self.assertIn("队伍排名", page)
             for medal in ("金色奖杯", "银色奖杯", "铜色奖杯"):
                 self.assertIn(medal, page)
+        self.assertIn("选手得分排行", puzzle)
         self.assertIn("解出动态", puzzle)
         self.assertNotIn("服务状态", puzzle)
+        self.assertIn("选手加固得分", rounds)
         self.assertIn("本回合剩余", rounds)
         self.assertIn("服务状态", rounds)
 
@@ -336,7 +424,7 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 3)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 4)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(len(self.lookup("SELECT id FROM round_tasks")), 2)

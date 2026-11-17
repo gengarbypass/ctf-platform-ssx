@@ -10,7 +10,7 @@
     {% set state = contest_state(g.managed,g.now) if g.managed.active else none %}
     <div class="arena-kpis">
       <div class="arena-panel arena-kpi"><span>参赛队伍</span><strong>{{ metrics.teams }}</strong></div>
-      <div class="arena-panel arena-kpi"><span>标记开放的赛题</span><strong>{{ metrics.challenges }}</strong></div>
+      <div class="arena-panel arena-kpi"><span>标记开放的{{ '靶点' if mode == 'breach' else '赛题' }}</span><strong>{{ metrics.challenges }}</strong></div>
       {% if mode == 'round' %}<div class="arena-panel arena-kpi"><span>补丁待评测 / 评测中</span><strong>{{ metrics.pending }}</strong></div>{% endif %}
     </div>
     {% call ui.panel("比赛进程") %}
