@@ -391,6 +391,53 @@ def challenges(kind):
     return render_template("manage/challenges.html", title="题目管理", rows=rows, kind=kind)
 
 
+def breach_flag_rows():
+    """解析批量创建靶点的多行表单；层级留空时沿用上一行，整行留空的行跳过。"""
+    layers = request.form.getlist("layer")
+    titles = request.form.getlist("title")
+    point_values = request.form.getlist("points")
+    flags = request.form.getlist("flag")
+    descriptions = request.form.getlist("description")
+    count = max(len(titles), len(flags), len(point_values), len(descriptions))
+    rows, carried_layer = [], ""
+    for index in range(count):
+        title = titles[index].strip() if index < len(titles) else ""
+        flag = flags[index].strip() if index < len(flags) else ""
+        layer = (layers[index].strip() if index < len(layers) else "") or carried_layer
+        description = descriptions[index].strip() if index < len(descriptions) else ""
+        points_raw = point_values[index] if index < len(point_values) else ""
+        if not title and not flag:
+            continue
+        label = f"第 {index + 1} 行靶点"
+        if not title:
+            raise FormError(f"请填写{label}的名称。")
+        if len(title) > 100:
+            raise FormError(f"{label}名称最多 100 个字符。")
+        if not flag:
+            raise FormError(f"请填写{label}的 Flag。")
+        if len(flag) > 256:
+            raise FormError(f"{label}Flag 最多 256 个字符。")
+        if not layer:
+            raise FormError(f"请填写{label}的所属层级（留空将沿用上一行）。")
+        if len(layer) > 40:
+            raise FormError(f"{label}层级最多 40 个字符。")
+        if len(description) > 16000:
+            raise FormError(f"{label}提示最多 16000 个字符。")
+        try:
+            points = int(points_raw)
+        except (TypeError, ValueError) as error:
+            raise FormError(f"{label}分值须为整数。") from error
+        if not 1 <= points <= 100_000:
+            raise FormError(f"{label}分值须在 1 到 100000 之间。")
+        salt, digest = new_flag(flag)
+        carried_layer = layer
+        rows.append({"title": title, "layer": layer, "points": points, "description": description,
+                     "flag_salt": salt, "flag_digest": digest})
+    if not rows:
+        raise FormError("请至少完整填写一行靶点（名称、分值与 Flag）。")
+    return rows
+
+
 @manage.route("/challenges/<kind>/new", defaults={"task_id": None}, methods=["GET", "POST"])
 @manage.route("/challenges/<kind>/<int:task_id>/edit", methods=["GET", "POST"])
 @admin_required
@@ -440,25 +487,31 @@ def challenge_edit(kind, task_id):
             for upload in uploads:
                 db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
     elif kind == "breach":
-        layer = text_field("layer", "所属层级", 40)
-        points = integer_field("points", "分值", 1, 100_000)
-        flag = text_field("flag", "Flag", 256, optional=task is not None)
-        salt_and_digest = new_flag(flag) if flag else None
-        with transaction(db, write=True):
-            managed_id(kind)
-            if task:
+        if task:
+            layer = text_field("layer", "所属层级", 40)
+            points = integer_field("points", "分值", 1, 100_000)
+            flag = text_field("flag", "Flag", 256, optional=True)
+            salt_and_digest = new_flag(flag) if flag else None
+            with transaction(db, write=True):
+                managed_id(kind)
                 if salt_and_digest:
                     db.execute("UPDATE breach_flags SET flag_salt = ?, flag_digest = ? WHERE id = ?", (*salt_and_digest, task_id))
                 db.execute(
                     """UPDATE breach_flags SET title = ?, layer = ?, description = ?, points = ?, published = ?
                        WHERE id = ? AND contest_id = ?""", (title, layer, description, points, published, task_id, contest_id),
                 )
-            else:
-                task_id = db.execute(
+            return saved("靶点已保存。", "manage.challenges", kind=kind)
+        rows = breach_flag_rows()
+        with transaction(db, write=True):
+            managed_id(kind)
+            for row in rows:
+                db.execute(
                     """INSERT INTO breach_flags (contest_id, title, layer, description, points, flag_salt, flag_digest, published)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (contest_id, title, layer, description, points, *salt_and_digest, published),
-                ).lastrowid
+                    (contest_id, row["title"], row["layer"], row["description"], row["points"],
+                     row["flag_salt"], row["flag_digest"], published),
+                )
+        return saved(f"已创建 {len(rows)} 个靶点。", "manage.challenges", kind=kind)
     else:
         baseline = text_field("baseline", "基线版本", 80)
         with transaction(db, write=True):

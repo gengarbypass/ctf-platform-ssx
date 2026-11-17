@@ -66,6 +66,32 @@ if (roundDuration) {
   updateRoundDuration();
 }
 
+const breachRows = document.querySelector("[data-breach-rows]");
+if (breachRows) {
+  const template = breachRows.querySelector("template[data-breach-row]");
+  const rows = () => breachRows.querySelectorAll(".arena-breach-row");
+  function renumberBreachRows() {
+    rows().forEach((row, index) => {
+      row.querySelector("[data-breach-row-label]").textContent = `靶点 ${index + 1}`;
+      row.querySelector("[data-breach-remove]").disabled = rows().length <= 1;
+    });
+  }
+  document.querySelector("[data-breach-add]")?.addEventListener("click", () => {
+    breachRows.appendChild(template.content.cloneNode(true));
+    renumberBreachRows();
+    const added = rows()[rows().length - 1];
+    added.querySelector("input[name='layer']").focus();
+  });
+  breachRows.addEventListener("click", event => {
+    const remove = event.target.closest("[data-breach-remove]");
+    if (remove && !remove.disabled && rows().length > 1) {
+      remove.closest(".arena-breach-row").remove();
+      renumberBreachRows();
+    }
+  });
+  renumberBreachRows();
+}
+
 const editor = document.querySelector("[data-brand-editor]");
 if (editor) {
   const preview = editor.querySelector("[data-brand-preview]");

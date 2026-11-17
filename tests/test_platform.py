@@ -287,6 +287,33 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("渗透预赛", waiting)
         self.assertNotIn("F1 备份泄露", waiting)
 
+    def test_breach_bulk_flag_creation(self):
+        contest_id = self.contest("蓝域杯 · 批量靶点赛", mode="breach")
+        self.post(self.admin, "/manage/challenges/breach/new", contest_id=contest_id,
+                  layer=["边界突破", "", "内网横向", ""],
+                  title=["F1 备份泄露", "F3 上传 Getshell", "F5 拖库取证", ""],
+                  points=["100", "150", "250", "300"],
+                  flag=["flag{f1}", "flag{f3}", "flag{f5}", ""],
+                  description=["robots 与备份目录", "", "", ""], published="1")
+        rows = self.lookup(
+            "SELECT layer, title, points, description FROM breach_flags WHERE contest_id = ? ORDER BY id", (contest_id,),
+        )
+        self.assertEqual([tuple(row) for row in rows], [
+            ("边界突破", "F1 备份泄露", 100, "robots 与备份目录"),
+            ("边界突破", "F3 上传 Getshell", 150, ""),
+            ("内网横向", "F5 拖库取证", 250, ""),
+        ])
+        form = self.admin.get("/manage/challenges/breach/new").get_data(as_text=True)
+        self.assertIn("靶点 1", form)
+        self.assertIn("留空沿用上一行", form)
+        # 半填行（有名称无 Flag）整体报错且不落库
+        self.post(self.admin, "/manage/challenges/breach/new", contest_id=contest_id,
+                  layer=["边界突破"], title=["F9 痕迹取证"], points=["400"], flag=[""], code=400)
+        # 整行留空视为无效提交
+        self.post(self.admin, "/manage/challenges/breach/new", contest_id=contest_id,
+                  layer=["", ""], title=["", ""], points=["100", "100"], flag=["", ""], code=400)
+        self.assertEqual(len(self.lookup("SELECT id FROM breach_flags WHERE contest_id = ?", (contest_id,))), 3)
+
     def test_scheduled_access_and_persistence(self):
         contest_id = self.contest(upcoming=True)
         player, _ = self.player(contest_id, "bluefox", "BlueFox")

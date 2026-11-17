@@ -1,12 +1,28 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
+{% macro breach_row(index=1) -%}
+<div class="arena-breach-row">
+  <div class="arena-breach-row-head"><strong data-breach-row-label>靶点 {{ index }}</strong>
+    <button class="arena-btn" type="button" data-breach-remove aria-label="移除此靶点">×</button></div>
+  <div class="arena-two">
+    {{ ui.field("所属层级","layer",max=40,required=false,placeholder="留空沿用上一行") }}
+    {{ ui.field("分值","points",100,type='number',min=1,maximum=100000) }}
+  </div>
+  <div class="arena-two">
+    {{ ui.field("靶点名称","title",max=100) }}
+    {{ ui.field("Flag","flag",max=256,placeholder="flag{…}") }}
+  </div>
+  {{ ui.description("靶点提示（选填）","description",rows=2,max=16000) }}
+</div>
+{%- endmacro %}
 {% block content %}
+  {% set bulk_breach = kind == 'breach' and not task %}
   <div class="arena-back">{{ ui.link("返回题目管理",url_for('manage.challenges',kind=kind),"link","back") }}</div>
   {{ ui.heading(title, g.managed.title) }}
   {% call ui.panel("赛题信息") %}
     <form class="arena-form arena-form-narrow" method="post" enctype="multipart/form-data">
       {{ ui.csrf(true) }}
-      {{ ui.field("题目名称","title",task.title if task else '',max=100) }}
+      {% if not bulk_breach %}{{ ui.field("题目名称","title",task.title if task else '',max=100) }}{% endif %}
       {% if kind == 'puzzle' %}
         <div class="arena-two">
           <label class="arena-field">分类<select class="arena-input" name="category">{% for category in categories %}<option{% if task and task.category == category %} selected{% endif %}>{{ category }}</option>{% endfor %}</select></label>
@@ -16,23 +32,32 @@
           {{ ui.field("分值","points",task.points if task else 100,type='number',min=1,maximum=100000) }}
           {{ ui.field("Flag","flag",type='password',max=256,required=not task,placeholder="留空保留当前 Flag" if task else "输入正确答案") }}
         </div>
-      {% elif kind == 'breach' %}
-        {{ ui.field("所属层级","layer",task.layer if task else '',max=40,placeholder="如 边界突破 / 内网横向 / 设备接管") }}
+      {% elif kind == 'breach' and task %}
+        {{ ui.field("所属层级","layer",task.layer,max=40,placeholder="如 边界突破 / 内网横向 / 设备接管") }}
         <div class="arena-two">
-          {{ ui.field("分值","points",task.points if task else 100,type='number',min=1,maximum=100000) }}
-          {{ ui.field("Flag","flag",type='password',max=256,required=not task,placeholder="留空保留当前 Flag" if task else "输入正确答案") }}
+          {{ ui.field("分值","points",task.points,type='number',min=1,maximum=100000) }}
+          {{ ui.field("Flag","flag",type='password',max=256,placeholder="留空保留当前 Flag") }}
         </div>
+      {% elif kind == 'breach' %}
+        <p class="arena-muted">综合靶场的每枚 Flag 对应一个靶点，可在此一次录入多行；「所属层级」留空时自动沿用上一行的层级。</p>
+        <div class="arena-breach-rows" data-breach-rows>
+          <template data-breach-row>{{ breach_row() }}</template>
+          {% for index in range(3) %}{{ breach_row(index + 1) }}{% endfor %}
+        </div>
+        <div class="arena-actions"><button class="arena-btn" type="button" data-breach-add>{{ ui.icon('plus') }}添加靶点</button></div>
       {% else %}{{ ui.field("基线版本","baseline",task.baseline if task else '',max=80) }}{% endif %}
-      {{ ui.description("靶点提示" if kind == 'breach' else "题目说明","description",task.description if task else '',rows=6,max=16000,required=kind != 'breach') }}
+      {% if not bulk_breach %}
+        {{ ui.description("靶点提示" if kind == 'breach' else "题目说明","description",task.description if task else '',rows=6,max=16000,required=kind != 'breach') }}
+      {% endif %}
       {% if kind == 'puzzle' %}
         <label class="arena-field">题目附件<input class="arena-input" type="file" name="attachments" multiple><small>赛题开放后，详情页会显示附件下载链接。</small></label>
         {% for file in files %}
           <div class="arena-attachment">{{ ui.link(file.name,url_for('site.download',file_id=file.id),"link","file") }}<label class="arena-checkbox"><input type="checkbox" name="remove_file" value="{{ file.id }}">移除</label></div>
         {% endfor %}
       {% endif %}
-      <label class="arena-checkbox"><input type="checkbox" name="published" value="1"{% if task and task.published %} checked{% endif %}>开放{{ '靶点' if kind == 'breach' else '赛题' }}</label>
+      <label class="arena-checkbox"><input type="checkbox" name="published" value="1"{% if task and task.published %} checked{% endif %}{% if bulk_breach %} checked{% endif %}>开放{{ '全部靶点' if bulk_breach else '靶点' if kind == 'breach' else '赛题' }}</label>
       <small class="arena-muted">比赛开启且到达开赛时间后，开放的{{ '靶点会在综合靶场显示' if kind == 'breach' else '赛题会在题库显示' }}。</small>
-      <div class="arena-actions"><button class="arena-btn primary" type="submit">保存{{ '靶点' if kind == 'breach' else '赛题' }}</button>{{ ui.link("取消",url_for('manage.challenges',kind=kind)) }}</div>
+      <div class="arena-actions"><button class="arena-btn primary" type="submit">保存{{ '全部靶点' if bulk_breach else '靶点' if kind == 'breach' else '赛题' }}</button>{{ ui.link("取消",url_for('manage.challenges',kind=kind)) }}</div>
     </form>
   {% endcall %}
 {% endblock %}
