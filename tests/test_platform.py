@@ -496,6 +496,41 @@ class PlatformTest(unittest.TestCase):
         # 表单中存在检测按钮与状态区
         self.assertIn("检测连通性", self.admin.get("/manage/bank/new").get_data(as_text=True))
 
+    def test_contest_cover_upload_crops_to_selection(self):
+        def png_stream():
+            buffer = io.BytesIO()
+            Image.new("RGB", (400, 200), "#224466").save(buffer, "PNG")
+            buffer.seek(0)
+            return buffer
+        self.post(self.admin, "/manage/contests/new", mode="puzzle", title="截取赛",
+                  start_at=(datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"),
+                  end_at=(datetime.now() + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M"))
+        contest_id = self.lookup("SELECT id FROM contests WHERE title = '截取赛'")[0][0]
+        # 无裁剪参数：整图保存
+        self.post(self.admin, f"/manage/contests/{contest_id}/edit", mode="puzzle", title="截取赛",
+                  start_at=(datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
+                  end_at=(datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+                  cover=(png_stream(), "wide.png"))
+        raw = self.lookup("SELECT content FROM uploads WHERE id = (SELECT cover_id FROM contests WHERE id = ?)",
+                          (contest_id,))[0][0]
+        self.assertEqual(Image.open(io.BytesIO(raw)).size, (400, 200))
+        # 带裁剪参数：保存为截取后的区域（所见即所得）
+        self.post(self.admin, f"/manage/contests/{contest_id}/edit", mode="puzzle", title="截取赛",
+                  start_at=(datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
+                  end_at=(datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+                  cover=(png_stream(), "crop.png"), crop_x="50", crop_y="60", crop_w="280", crop_h="100")
+        raw = self.lookup("SELECT content FROM uploads WHERE id = (SELECT cover_id FROM contests WHERE id = ?)",
+                          (contest_id,))[0][0]
+        self.assertEqual(Image.open(io.BytesIO(raw)).size, (280, 100))
+        # 非法裁剪参数被拒绝且不落库
+        self.post(self.admin, f"/manage/contests/{contest_id}/edit", mode="puzzle", title="截取赛",
+                  start_at=(datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
+                  end_at=(datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+                  cover=(png_stream(), "crop.png"), crop_x="-5", crop_y="0", crop_w="280", crop_h="100", code=400)
+        self.assertEqual(Image.open(io.BytesIO(
+            self.lookup("SELECT content FROM uploads WHERE id = (SELECT cover_id FROM contests WHERE id = ?)",
+                        (contest_id,))[0][0])).size, (280, 100))
+
     def test_bulk_delete_accounts(self):
         contest_id = self.contest()
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")

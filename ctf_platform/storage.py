@@ -1,7 +1,7 @@
 import io
 import re
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from flask import current_app, send_file
 from PIL import Image, UnidentifiedImageError
@@ -53,6 +53,33 @@ def read_upload(file, kind, *, required=False):
         except (zipfile.BadZipFile, UnicodeError, ValueError, NotImplementedError) as error:
             raise FormError("补丁包须为有效且非空的 ZIP 文件。") from error
     return Upload(kind, name, media_type, content)
+
+
+def crop_cover(upload, form):
+    """按上传时拖动选定的裁剪框截取比赛背景图（保存即所见即所得），返回新 Upload。
+
+    未提供裁剪参数（旧表单/无新图）时原样返回；参数越界按实际图片尺寸钳制。
+    """
+    if upload is None:
+        return None
+    try:
+        x, y, width, height = (int(form.get(key, "")) for key in ("crop_x", "crop_y", "crop_w", "crop_h"))
+    except ValueError:
+        return upload
+    if x < 0 or y < 0 or width < 1 or height < 1:
+        raise FormError("背景图截取参数无效，请重新选择图片并调整截取区域。")
+    try:
+        with Image.open(io.BytesIO(upload.content)) as image:
+            x = min(x, image.width - 1)
+            y = min(y, image.height - 1)
+            width = min(width, image.width - x)
+            height = min(height, image.height - y)
+            cropped = image.crop((x, y, x + width, y + height))
+            output = io.BytesIO()
+            cropped.save(output, format=image.format or "PNG")
+    except (UnidentifiedImageError, OSError) as error:
+        raise FormError("无法读取背景图，请重新选择图片。") from error
+    return replace(upload, content=output.getvalue())
 
 
 def save_upload(db, upload, now):

@@ -131,7 +131,7 @@ def create_app(overrides=None):
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
+            "img-src 'self' blob: data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
         )
         if request.endpoint != "static":
             response.headers["Cache-Control"] = "no-store"

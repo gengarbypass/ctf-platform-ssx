@@ -138,6 +138,74 @@ if (bulkDelete) {
   sync();
 }
 
+const coverInput = document.querySelector("[data-cover-input]");
+const cropEditor = document.querySelector("[data-crop-editor]");
+if (coverInput && cropEditor) {
+  const canvas = cropEditor.querySelector("[data-crop-canvas]");
+  const current = document.querySelector("[data-cover-current]");
+  const fields = {};
+  for (const name of ["crop_x", "crop_y", "crop_w", "crop_h"]) fields[name] = cropEditor.querySelector(`input[name='${name}']`);
+  const view = { scale: 1, x: 0, y: 0 };
+  let bitmap = null;
+  let drag = null;
+
+  function clampView() {
+    const box = cropEditor.getBoundingClientRect();
+    view.x = Math.min(0, Math.max(box.width - bitmap.width * view.scale, view.x));
+    view.y = Math.min(0, Math.max(box.height - bitmap.height * view.scale, view.y));
+  }
+  function render() {
+    const width = Math.round(bitmap.width * view.scale);
+    const height = Math.round(bitmap.height * view.scale);
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.style.left = `${view.x}px`;
+    canvas.style.top = `${view.y}px`;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, width, height);
+  }
+  function layout() {
+    const box = cropEditor.getBoundingClientRect();
+    view.scale = Math.max(box.width / bitmap.width, box.height / bitmap.height);
+    view.x = (box.width - bitmap.width * view.scale) / 2;
+    view.y = (box.height - bitmap.height * view.scale) / 2;
+    clampView();
+    render();
+    writeFields();
+  }
+  function writeFields() {
+    const box = cropEditor.getBoundingClientRect();
+    fields.crop_x.value = Math.round(-view.x / view.scale);
+    fields.crop_y.value = Math.round(-view.y / view.scale);
+    fields.crop_w.value = Math.round(box.width / view.scale);
+    fields.crop_h.value = Math.round(box.height / view.scale);
+  }
+  async function loadCover(file) {
+    cropEditor.hidden = false;
+    if (current) current.hidden = true;
+    bitmap = await createImageBitmap(file);
+    layout();
+  }
+  coverInput.addEventListener("change", () => {
+    if (coverInput.files[0]) loadCover(coverInput.files[0]);
+  });
+  canvas.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    drag = { startX: event.clientX, startY: event.clientY, baseX: view.x, baseY: view.y };
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener("pointermove", event => {
+    if (!drag) return;
+    view.x = drag.baseX + event.clientX - drag.startX;
+    view.y = drag.baseY + event.clientY - drag.startY;
+    clampView();
+    render();
+    writeFields();
+  });
+  canvas.addEventListener("pointerup", () => { drag = null; });
+}
+
 const editor = document.querySelector("[data-brand-editor]");
 if (editor) {
   const preview = editor.querySelector("[data-brand-preview]");

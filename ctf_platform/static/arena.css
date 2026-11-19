@@ -400,7 +400,12 @@ body { margin: 0; background: #f2f5fb; }
   #lanyu-arena .arena-checkbox input { accent-color: var(--arena-blue); }
   #lanyu-arena .arena-check { width: 34px; text-align: center; }
   #lanyu-arena .arena-check input { accent-color: var(--arena-blue); vertical-align: middle; }
-#lanyu-arena .arena-cover-preview { width: min(100%, 540px); max-height: 210px; object-fit: cover; border-radius: var(--arena-radius); }
+  #lanyu-arena .arena-cover-preview { width: min(100%, 540px); max-height: 210px; object-fit: cover; border-radius: var(--arena-radius); }
+  #lanyu-arena .arena-crop-editor { position: relative; overflow: hidden; width: min(100%, 640px); aspect-ratio: 27 / 5; border: 1px dashed var(--arena-border); border-radius: var(--arena-radius); background: var(--arena-soft); cursor: grab; touch-action: none; }
+  #lanyu-arena .arena-crop-editor:active { cursor: grabbing; }
+  #lanyu-arena .arena-crop-editor canvas { position: absolute; inset: 0 auto auto 0; max-width: none; user-select: none; }
+  #lanyu-arena .arena-hero.has-image::after { content: none; }
+  #lanyu-arena .arena-hero.has-image :is(.arena-hero-title, p, .arena-hero-date) { text-shadow: 0 1px 6px rgba(4, 16, 40, .5), 0 0 2px rgba(4, 16, 40, .35); }
 #lanyu-arena .arena-trend { display: flex; align-items: end; gap: 10px; padding: 0 16px 15px; min-height: 130px; }
 #lanyu-arena .arena-trend-point { flex: 1 1 0; min-width: 0; display: grid; justify-items: center; gap: 5px; color: var(--arena-blue-ink); font-size: 12px; }
 #lanyu-arena .arena-trend-track { width: min(38px, 70%); height: 72px; display: flex; align-items: end; background: var(--arena-soft); border-radius: 4px; overflow: hidden; }

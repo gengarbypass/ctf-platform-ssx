@@ -4,7 +4,7 @@
   <div class="arena-back">{{ ui.link("返回比赛配置", url_for('manage.contests'), "link", "back") }}</div>
   {{ ui.heading(title, "赛程时区 " ~ timezone) }}
   {% call ui.panel("比赛信息") %}
-    <form class="arena-form arena-form-narrow" method="post" enctype="multipart/form-data" data-image-form data-contest-form>
+    <form class="arena-form arena-form-narrow" method="post" enctype="multipart/form-data" data-contest-form>
       {{ ui.csrf() }}
       {% set mode = contest.mode if contest else '' %}
       {% if contest and contest.active %}
@@ -48,9 +48,18 @@
           </div>
         {% endcall %}
       {% endif %}
-      <label class="arena-field">比赛背景图<input class="arena-input" type="file" name="cover" accept="image/png,image/jpeg,image/webp" data-image-input><small>显示在比赛首页和对应赛场。</small></label>
-      <img class="arena-cover-preview" alt="比赛背景图预览" data-image-preview{% if contest and contest.cover_id %} src="{{ url_for('site.image', file_id=contest.cover_id) }}"{% else %} hidden{% endif %}>
-      {% if contest and contest.cover_id %}<label class="arena-checkbox"><input type="checkbox" name="remove_cover" value="1" data-remove-image>移除背景图</label>{% endif %}
+      <label class="arena-field">比赛背景图<input class="arena-input" type="file" name="cover" accept="image/png,image/jpeg,image/webp" data-cover-input><small>保存后直接作为比赛头图背景展示（无渐变遮罩）。选择图片后可拖动调整保留区域，超出显示范围的部分将在保存时截取。</small></label>
+      {% if contest and contest.cover_id %}
+      <img class="arena-cover-preview" alt="当前背景图" data-cover-current src="{{ url_for('site.image', file_id=contest.cover_id) }}">
+      {% endif %}
+      <div class="arena-crop-editor" data-crop-editor hidden>
+        <canvas data-crop-canvas></canvas>
+        <input type="hidden" name="crop_x">
+        <input type="hidden" name="crop_y">
+        <input type="hidden" name="crop_w">
+        <input type="hidden" name="crop_h">
+      </div>
+      {% if contest and contest.cover_id %}<label class="arena-checkbox"><input type="checkbox" name="remove_cover" value="1">移除背景图</label>{% endif %}
       <div class="arena-actions"><button class="arena-btn primary" type="submit">保存比赛</button>{{ ui.link("取消",url_for('manage.contests')) }}</div>
     </form>
   {% endcall %}

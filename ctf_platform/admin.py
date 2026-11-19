@@ -13,7 +13,7 @@ from .domain import (
 )
 from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix
 from .range import RangeError, probe_image, stop_environment
-from .storage import read_upload, save_upload
+from .storage import crop_cover, read_upload, save_upload
 from .views import PAGE_SIZE, page_number, records_kind
 
 
@@ -141,7 +141,7 @@ def contest_edit(contest_id):
             env_max = integer_field("env_max", "环境上限", 1, 500)
     if end_at <= start_at:
         raise FormError("结束时间须晚于开赛时间。")
-    cover = read_upload(request.files.get("cover"), "cover")
+    cover = crop_cover(read_upload(request.files.get("cover"), "cover"), request.form)
     remove_cover = request.form.get("remove_cover") == "1"
     with transaction(db, write=True):
         if contest:
