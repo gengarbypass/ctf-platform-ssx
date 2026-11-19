@@ -524,6 +524,34 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual([(row["verdict"], row["user_id"], row["team_id"]) for row in rows], [("correct", None, team_id)])
         self.assertIn("已删除账号", self.admin.get("/api/scoreboard/puzzle").json["content"])
 
+    def test_junction_foreign_key_repair(self):
+        """复现历史迁移遗留的悬挂外键（关联表指向已删除的 _legacy 表），启动时自动修复。"""
+        contest_id = self.contest()
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        with closing(connect(self.app.config["DATABASE"])) as db:
+            db.execute("PRAGMA foreign_keys = OFF")
+            db.executescript(f"""
+                BEGIN IMMEDIATE;
+                DROP TABLE contest_teams;
+                CREATE TABLE contest_teams (
+                    contest_id INTEGER NOT NULL REFERENCES contests_missing(id) ON DELETE CASCADE,
+                    team_id INTEGER NOT NULL,
+                    UNIQUE (contest_id, team_id));
+                INSERT INTO contest_teams VALUES ({contest_id}, {team_id});
+                COMMIT;""")
+        repaired = create_app({**self.settings, "ADMIN_PASSWORD": ""})
+        with closing(connect(repaired.config["DATABASE"])) as db:
+            parents = [row["table"] for row in db.execute("PRAGMA foreign_key_list(contest_teams)")]
+            self.assertEqual(parents, ["contests"])
+            self.assertEqual(len(db.execute(
+                "SELECT team_id FROM contest_teams WHERE contest_id = ?", (contest_id,)).fetchall()), 1)
+        # 修复后关联写入恢复正常（此前会 500）
+        admin = self.login("arenaops", repaired)
+        self.post(admin, f"/manage/contests/{contest_id}/teams/add", team_id=team_id)
+        with closing(connect(repaired.config["DATABASE"])) as db:
+            self.assertEqual(len(db.execute(
+                "SELECT team_id FROM contest_teams WHERE contest_id = ?", (contest_id,)).fetchall()), 1)
+
     def test_import_users_and_teams(self):
         contest_id = self.contest("导入验证赛", active=False)
         users_csv = "账号,显示名,密码,角色\nfox01,狐狸一号,ImportPass-01,player\nfox02,狐狸二号,ImportPass-02,player\nchief,指挥官,ImportPass-03,admin\n"
@@ -533,6 +561,11 @@ class PlatformTest(unittest.TestCase):
         # 重复导入整体回滚
         self.post(self.admin, "/manage/import/users", code=400,
                   file=(io.BytesIO(users_csv.encode("utf-8")), "users.csv"))
+        # GBK 编码兼容（中文 Excel 默认导出）
+        gbk_csv = "账号,显示名,密码,角色\ngbkuser,中文编码,ImportPass-07,player\n".encode("gbk")
+        self.post(self.admin, "/manage/import/users",
+                  file=(io.BytesIO(gbk_csv), "users.csv"))
+        self.assertEqual(len(self.lookup("SELECT id FROM users WHERE username = 'gbkuser'")), 1)
         teams_csv = ("队伍,账号,显示名,密码\n"
                      "蓝狐突击队,fox01,狐狸一号,\n"
                      "蓝狐突击队,fox03,新队员,ImportPass-04\n"
@@ -557,6 +590,14 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, f"/manage/contests/{contest_id}/puzzles/remove", puzzle_id=bank_id)
         self.assertEqual(self.lookup("SELECT COUNT(*) FROM contest_puzzles WHERE puzzle_id = ?", (bank_id,))[0][0], 0)
         self.assertEqual(self.lookup("SELECT id FROM puzzles WHERE id = ?", (bank_id,))[0][0], bank_id)
+        # 同名（忽略大小写）队伍复用为同一支，不报错、不重复建队
+        teams_csv2 = "队伍,账号,显示名,密码\n极光战队,aur01,极光英文队员,ImportPass-08\n"
+        self.post(self.admin, "/manage/import/teams", contest_id=contest_id,
+                  file=(io.BytesIO(teams_csv2.encode("utf-8")), "teams.csv"))
+        self.assertEqual(len(self.lookup("SELECT id FROM teams WHERE name = '极光战队'")), 1)
+        self.assertEqual(len(self.lookup(
+            "SELECT user_id FROM memberships WHERE team_id = (SELECT id FROM teams WHERE name = '极光战队') "
+            "AND contest_id = ?", (contest_id,))), 1)
 
         # 新建比赛自动沿用上一场比赛的队伍与分队，无需重新配置
         from datetime import timedelta

@@ -327,10 +327,14 @@ def _csv_rows(file, required):
     """读取上传的 CSV（UTF-8，兼容 Excel BOM），校验表头，返回数据行。"""
     if file is None or not file.filename:
         raise FormError("请选择要导入的 CSV 文件。")
+    raw = file.stream.read()
     try:
-        text = file.stream.read().decode("utf-8-sig")
-    except UnicodeDecodeError as error:
-        raise FormError("CSV 文件须为 UTF-8 编码（Excel 另存为 CSV UTF-8 即可）。") from error
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("gbk")   # 兼容中文 Excel 默认的 ANSI/GBK 导出
+        except UnicodeDecodeError as error:
+            raise FormError("CSV 文件须为 UTF-8 或 GBK 编码。") from error
     rows = [row for row in csv.reader(io.StringIO(text)) if any(cell.strip() for cell in row)]
     if not rows:
         raise FormError("文件内容为空。")
@@ -417,8 +421,13 @@ def import_teams():
             if not team_name or len(team_name) > 50:
                 raise FormError(f"第 {number} 行队伍名须为 1–50 个字符。")
             if team_name not in team_ids:
-                team_ids[team_name] = db.execute("INSERT INTO teams (name) VALUES (?)", (team_name,)).lastrowid
-                teams_created += 1
+                # 名册大小写不敏感：大小写变体视为同一支队伍，直接复用
+                existing = db.execute("SELECT id FROM teams WHERE name = ? COLLATE NOCASE", (team_name,)).fetchone()
+                team_ids[team_name] = existing["id"] if existing else db.execute(
+                    "INSERT INTO teams (name) VALUES (?)", (team_name,),
+                ).lastrowid
+                if not existing:
+                    teams_created += 1
             db.execute(
                 "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) VALUES (?, ?)",
                 (contest_id, team_ids[team_name]),

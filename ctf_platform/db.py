@@ -13,9 +13,10 @@ from .domain import username_value, validate_password
 SCHEMA_VERSION = 8
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
-    "contest_puzzles", "breach_flags", "breach_submissions", "breach_environments",
+    "contest_puzzles", "contest_teams", "breach_flags", "breach_submissions", "breach_environments",
     "round_tasks", "service_states", "patches", "score_events",
 )
+JUNCTION_TABLES = ("contest_puzzles", "contest_teams")
 
 
 def connect(path):
@@ -108,8 +109,37 @@ def add_column(connection, table, column_def):
         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
 
 
+def dangling_junctions(connection):
+    """找出外键指向不存在表的关联表（历史 rename/drop 迁移可能遗留悬挂引用）。"""
+    broken = []
+    for table in JUNCTION_TABLES:
+        if table_columns(connection, table) is None:
+            continue
+        for fk in connection.execute(f"PRAGMA foreign_key_list({table})"):
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (fk["table"],),
+            ).fetchone() is None:
+                broken.append(table)
+                break
+    return broken
+
+
+def recreate_junction(connection, table, schema):
+    rows = connection.execute(f"SELECT * FROM {table}").fetchall()
+    connection.execute(f"DROP TABLE {table}")
+    for statement in schema:
+        if f"CREATE TABLE IF NOT EXISTS {table} " in statement:
+            connection.execute(statement)
+            break
+    if rows:
+        cols = ", ".join(rows[0].keys())
+        placeholders = ", ".join("?" * len(rows[0]))
+        connection.executemany(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})", [tuple(row) for row in rows])
+
+
 def prepare_schema(connection):
-    if connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
+    broken = dangling_junctions(connection)
+    if connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION and not broken:
         return
     connection.execute("PRAGMA foreign_keys = OFF")
     try:
@@ -118,6 +148,10 @@ def prepare_schema(connection):
             if version > SCHEMA_VERSION:
                 raise RuntimeError("数据库版本高于当前应用版本。")
             if version == SCHEMA_VERSION:
+                # 仅修复历史迁移遗留的悬挂外键
+                schema = tuple(schema_statements())
+                for table in broken:
+                    recreate_junction(connection, table, schema)
                 return
             if 1 <= version <= 6:
                 # 赛题题库化：先把既有赛题与比赛的归属搬入关联表（重建后 puzzles 不再带 contest_id）
@@ -186,6 +220,9 @@ def prepare_schema(connection):
             else:
                 for statement in schema:
                     connection.execute(statement)
+            # rename/drop 可能遗留悬挂外键：如实修复
+            for table in dangling_junctions(connection):
+                recreate_junction(connection, table, schema)
             invalid = connection.execute("PRAGMA foreign_key_check").fetchone()
             if invalid:
                 raise RuntimeError(f"数据库升级发现无效关联，请检查 {invalid['table']} 表。")
