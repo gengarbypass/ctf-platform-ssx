@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS contests (
     start_at INTEGER NOT NULL,
     end_at INTEGER NOT NULL CHECK (end_at > start_at),
     round_seconds INTEGER CHECK (round_seconds > 0),
+    env_image TEXT,
+    env_container_port INTEGER CHECK (env_container_port IS NULL OR env_container_port BETWEEN 1 AND 65535),
+    env_ttl_minutes INTEGER CHECK (env_ttl_minutes IS NULL OR env_ttl_minutes BETWEEN 5 AND 1440),
+    env_max INTEGER CHECK (env_max IS NULL OR env_max BETWEEN 1 AND 500),
     cover_id INTEGER REFERENCES uploads(id),
     active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
     created_at INTEGER NOT NULL,
@@ -139,6 +143,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_breach_award ON breach_submissions(flag_id
 CREATE INDEX IF NOT EXISTS breach_team ON breach_submissions(contest_id, team_id, id DESC);
 CREATE INDEX IF NOT EXISTS breach_team_recent ON breach_submissions(contest_id, team_id, submitted_at);
 CREATE INDEX IF NOT EXISTS breach_contest ON breach_submissions(contest_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS breach_environments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest_id INTEGER NOT NULL,
+    team_id INTEGER NOT NULL,
+    container_id TEXT NOT NULL DEFAULT '',
+    network_id TEXT NOT NULL DEFAULT '',
+    host_port INTEGER,
+    secret TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'starting' CHECK (status IN ('starting', 'running', 'stopped', 'error')),
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    stopped_at INTEGER,
+    expires_at INTEGER,
+    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    UNIQUE (contest_id, team_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_env_port ON breach_environments(host_port) WHERE host_port IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS round_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

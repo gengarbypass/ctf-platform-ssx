@@ -101,6 +101,15 @@ def contest_edit(contest_id):
     start_at = parse_local_time("start_at", "开赛时间")
     end_at = parse_local_time("end_at", "结束时间")
     round_seconds = integer_field("round_minutes", "回合分钟数", 1, 1440) * 60 if mode == "round" else None
+    env_image = env_container_port = env_ttl_minutes = env_max = None
+    if mode == "breach":
+        env_image = request.form.get("env_image", "").strip()
+        if env_image:
+            if len(env_image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", env_image):
+                raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
+            env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
+            env_ttl_minutes = integer_field("env_ttl_minutes", "环境时长", 5, 1440)
+            env_max = integer_field("env_max", "环境上限", 1, 500)
     if end_at <= start_at:
         raise FormError("结束时间须晚于开赛时间。")
     cover = read_upload(request.files.get("cover"), "cover")
@@ -122,16 +131,19 @@ def contest_edit(contest_id):
                 raise FormError("已有回合积分记录，请保留开赛时间、回合长度和已计分回合。")
         old_cover_id = contest["cover_id"] if contest else None
         cover_id = save_upload(db, cover, g.now) if cover else (None if remove_cover else old_cover_id)
-        values = (title, summary, mode, start_at, end_at, round_seconds, cover_id)
+        values = (title, summary, mode, start_at, end_at, round_seconds,
+                  env_image, env_container_port, env_ttl_minutes, env_max, cover_id)
         if contest:
             db.execute(
-                "UPDATE contests SET title = ?, summary = ?, mode = ?, start_at = ?, end_at = ?, round_seconds = ?, cover_id = ? WHERE id = ?",
+                """UPDATE contests SET title = ?, summary = ?, mode = ?, start_at = ?, end_at = ?, round_seconds = ?,
+                   env_image = ?, env_container_port = ?, env_ttl_minutes = ?, env_max = ?, cover_id = ? WHERE id = ?""",
                 (*values, contest_id),
             )
         else:
             contest_id = db.execute(
-                """INSERT INTO contests (title, summary, mode, start_at, end_at, round_seconds, cover_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO contests (title, summary, mode, start_at, end_at, round_seconds,
+                                         env_image, env_container_port, env_ttl_minutes, env_max, cover_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (*values, g.now),
             ).lastrowid
         if old_cover_id is not None and cover_id != old_cover_id:
@@ -391,8 +403,11 @@ def challenges(kind):
     return render_template("manage/challenges.html", title="题目管理", rows=rows, kind=kind)
 
 
-def breach_flag_rows():
-    """解析批量创建靶点的多行表单；层级留空时沿用上一行，整行留空的行跳过。"""
+def breach_flag_rows(*, allow_empty_flags):
+    """解析批量创建靶点的多行表单；层级留空时沿用上一行，整行留空的行跳过。
+
+    动态环境比赛（已配置镜像）允许 Flag 留空——各队 Flag 由环境启动时派生注入。
+    """
     layers = request.form.getlist("layer")
     titles = request.form.getlist("title")
     point_values = request.form.getlist("points")
@@ -413,8 +428,8 @@ def breach_flag_rows():
             raise FormError(f"请填写{label}的名称。")
         if len(title) > 100:
             raise FormError(f"{label}名称最多 100 个字符。")
-        if not flag:
-            raise FormError(f"请填写{label}的 Flag。")
+        if not flag and not allow_empty_flags:
+            raise FormError(f"请填写{label}的 Flag，或在比赛配置中填写环境镜像启用动态 Flag。")
         if len(flag) > 256:
             raise FormError(f"{label}Flag 最多 256 个字符。")
         if not layer:
@@ -429,7 +444,7 @@ def breach_flag_rows():
             raise FormError(f"{label}分值须为整数。") from error
         if not 1 <= points <= 100_000:
             raise FormError(f"{label}分值须在 1 到 100000 之间。")
-        salt, digest = new_flag(flag)
+        salt, digest = new_flag(flag) if flag else ("", "")
         carried_layer = layer
         rows.append({"title": title, "layer": layer, "points": points, "description": description,
                      "flag_salt": salt, "flag_digest": digest})
@@ -501,7 +516,9 @@ def challenge_edit(kind, task_id):
                        WHERE id = ? AND contest_id = ?""", (title, layer, description, points, published, task_id, contest_id),
                 )
             return saved("靶点已保存。", "manage.challenges", kind=kind)
-        rows = breach_flag_rows()
+        rows = breach_flag_rows(allow_empty_flags=bool(db.execute(
+            "SELECT env_image FROM contests WHERE id = ?", (contest_id,),
+        ).fetchone()[0]))
         with transaction(db, write=True):
             managed_id(kind)
             for row in rows:

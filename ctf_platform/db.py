@@ -10,10 +10,11 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
-    "breach_flags", "breach_submissions", "round_tasks", "service_states", "patches", "score_events",
+    "breach_flags", "breach_submissions", "breach_environments", "round_tasks", "service_states",
+    "patches", "score_events",
 )
 
 
@@ -71,12 +72,14 @@ def rebuild_tables(connection, schema):
     for statement in schema:
         connection.execute(statement)
     connection.execute(
-        """INSERT INTO contests (id, title, summary, mode, start_at, end_at, round_seconds, cover_id, active, created_at)
+        """INSERT INTO contests (id, title, summary, mode, start_at, end_at, round_seconds, env_image,
+                                 env_container_port, env_ttl_minutes, env_max, cover_id, active, created_at)
            SELECT c.id, c.title, c.summary, c.mode, c.start_at, c.end_at,
                   CASE WHEN c.mode = 'round'
                          OR EXISTS (SELECT 1 FROM round_tasks_legacy WHERE contest_id = c.id)
                          OR EXISTS (SELECT 1 FROM score_events_legacy WHERE contest_id = c.id)
                        THEN c.round_seconds END,
+                  c.env_image, c.env_container_port, c.env_ttl_minutes, c.env_max,
                   c.cover_id, c.active, c.created_at
            FROM contests_legacy c"""
     )
@@ -109,6 +112,9 @@ def prepare_schema(connection):
                          AND (EXISTS (SELECT 1 FROM round_tasks WHERE contest_id = contests.id)
                               OR EXISTS (SELECT 1 FROM score_events WHERE contest_id = contests.id))"""
                 )
+            if 1 <= version <= 4:
+                for column in ("env_image TEXT", "env_container_port INTEGER", "env_ttl_minutes INTEGER", "env_max INTEGER"):
+                    connection.execute(f"ALTER TABLE contests ADD COLUMN {column}")
             schema = tuple(schema_statements())
             if version:
                 rebuild_tables(connection, schema)

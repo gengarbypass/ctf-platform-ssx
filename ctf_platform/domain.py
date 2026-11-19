@@ -29,6 +29,12 @@ FLAG_VERDICTS = {
     "already_solved": "已解出",
 }
 SCORE_KINDS = {"attack": "攻防", "defense": "加固", "uptime": "可用性"}
+ENV_STATUSES = {
+    "starting": "启动中",
+    "running": "运行中",
+    "stopped": "已停止",
+    "error": "异常",
+}
 
 
 class FormError(ValueError):
@@ -124,6 +130,12 @@ def flag_digest(salt, value):
 def new_flag(value):
     salt = secrets.token_hex(16)
     return salt, flag_digest(salt, value)
+
+
+def env_flag_value(secret, env_id, flag_id):
+    """由环境密钥派生某靶点对某队伍的动态 Flag；secret 不变则值稳定，供重启后保持。"""
+    digest = hmac.new(secret.encode("utf-8"), f"env:{env_id}:flag:{flag_id}".encode("utf-8"), "sha256").hexdigest()[:16]
+    return f"flag{{e{env_id}-{digest}}}"
 
 
 def login_required(view):

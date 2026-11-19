@@ -13,7 +13,7 @@ from werkzeug.security import generate_password_hash
 
 from .db import close_db, get_db, initialize
 from .domain import (
-    CONTEST_MODES, FLAG_VERDICTS, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError,
+    CONTEST_MODES, ENV_STATUSES, FLAG_VERDICTS, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError,
     contest_schedule, contest_state, countdown, local_time, round_segments,
 )
 
@@ -45,6 +45,11 @@ def create_app(overrides=None):
         MAX_FORM_MEMORY_SIZE=500_000,
         MAX_FORM_PARTS=60,
         BOARD_POLL_SECONDS=_setting_int("CTF_BOARD_POLL_SECONDS", 4, 2, 60),
+        ENV_HOST=os.environ.get("CTF_ENV_HOST", ""),
+        ENV_PORT_START=_setting_int("CTF_ENV_PORT_START", 8400, 1024, 65000),
+        ENV_MEM_LIMIT=os.environ.get("CTF_ENV_MEM_LIMIT", "768m"),
+        ENV_CPU_QUOTA=_setting_int("CTF_ENV_CPU_QUOTA", 150000, 10000, 1000000),
+        ENV_PIDS_LIMIT=_setting_int("CTF_ENV_PIDS_LIMIT", 320, 32, 8192),
         SESSION_COOKIE_NAME="lanyu_session",
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -111,6 +116,7 @@ def create_app(overrides=None):
             "service_states": SERVICE_STATES,
             "flag_verdicts": FLAG_VERDICTS,
             "score_kinds": SCORE_KINDS,
+            "env_statuses": ENV_STATUSES,
             "timezone": app.config["TIME_ZONE"].key,
             "signed": lambda value: f"{value:+,}",
         }

@@ -21,8 +21,16 @@ services:
       CTF_BOARD_POLL_SECONDS: ${CTF_BOARD_POLL_SECONDS:-4}
       CTF_WEB_WORKERS: ${CTF_WEB_WORKERS:-2}
       CTF_WEB_THREADS: ${CTF_WEB_THREADS:-4}
+      CTF_ENV_HOST: ${CTF_ENV_HOST:-}
+      CTF_ENV_PORT_START: ${CTF_ENV_PORT_START:-8400}
+      CTF_ENV_MEM_LIMIT: ${CTF_ENV_MEM_LIMIT:-768m}
+      CTF_ENV_CPU_QUOTA: ${CTF_ENV_CPU_QUOTA:-150000}
+      CTF_ENV_PIDS_LIMIT: ${CTF_ENV_PIDS_LIMIT:-320}
     volumes:
       - data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${CTF_DOCKER_GID:-999}"
     stop_grace_period: 25s
 volumes:
   data:

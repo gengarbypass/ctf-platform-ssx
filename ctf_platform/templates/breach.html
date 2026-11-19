@@ -22,6 +22,46 @@
       </nav>
       {{ ui.link("计分板大屏", url_for('site.scoreboard', kind='breach'), "primary", "screen") }}
     </div>
+    {% if data.environment is defined %}
+      {% set env = data.environment %}
+      {% call ui.panel("靶场环境") %}
+        {% if not g.team %}
+          <div class="arena-detail-copy"><p>加入当前比赛的队伍后即可启动专属环境。</p></div>
+        {% elif not env or env.status == 'stopped' %}
+          <div class="arena-detail-copy">
+            <p>本队还没有运行中的环境。启动后将获得独立容器与专属端口，Flag 由平台为本队生成。</p>
+          </div>
+          <form class="arena-actions" action="{{ url_for('site.start_breach_environment') }}" method="post">
+            {{ ui.csrf() }}<button class="arena-btn primary" type="submit">{{ ui.icon('plus') }}{{ '重启环境' if env else '启动环境' }}</button>
+          </form>
+        {% elif env.status == 'starting' %}
+          <div class="arena-detail-copy"><p>环境启动中，稍候自动刷新…</p></div>
+          <meta http-equiv="refresh" content="4">
+        {% elif env.status == 'error' %}
+          <div class="arena-detail-copy">
+            <div class="arena-feedback error" role="status">环境启动失败：{{ env.last_error or '未知错误' }}</div>
+          </div>
+          <form class="arena-actions" action="{{ url_for('site.start_breach_environment') }}" method="post">
+            {{ ui.csrf() }}<button class="arena-btn primary" type="submit">重试启动</button>
+          </form>
+        {% else %}
+          <div class="arena-detail-copy">
+            <dl class="arena-detail-data">
+              <div><dt>环境地址</dt><dd><a class="arena-mono" href="http://{{ data.environment_host }}:{{ env.host_port }}" target="_blank" rel="noopener">http://{{ data.environment_host }}:{{ env.host_port }}</a></dd></div>
+              {% if env.expires_at %}
+              <div><dt>剩余时间</dt><dd><time class="arena-mono" data-clock-end="{{ env.expires_at }}" data-server-now="{{ g.now }}">{{ countdown(env.expires_at - g.now) }}</time></dd></div>
+              {% endif %}
+              <div><dt>状态</dt><dd>{{ ui.pill(env_statuses[env.status], 'success') }}</dd></div>
+            </dl>
+            <p>每枚 Flag 只对本队环境有效；重启环境后地址与 Flag 保持不变。</p>
+          </div>
+          <div class="arena-actions">
+            <form action="{{ url_for('site.start_breach_environment') }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">重启环境</button></form>
+            <form action="{{ url_for('site.stop_breach_environment') }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">停止环境</button></form>
+          </div>
+        {% endif %}
+      {% endcall %}
+    {% endif %}
     {% call ui.panel("提交 Flag") %}
       {% if g.match.status != 'live' %}
         <div class="arena-detail-copy"><p>当前不在比赛提交时间内。</p></div>

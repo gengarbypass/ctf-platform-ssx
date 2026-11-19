@@ -8,11 +8,13 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta
 from threading import Barrier
+from types import SimpleNamespace
 
 from PIL import Image
 
 from ctf_platform import create_app
 from ctf_platform.db import connect
+from ctf_platform.domain import env_flag_value
 
 
 def png():
@@ -28,6 +30,44 @@ def patch_zip():
         archive.writestr("notes.txt", "Test submission material.")
     data.seek(0)
     return data
+
+
+class FakeDocker:
+    """记录容器/网络操作的最小 Docker 客户端替身。"""
+
+    def __init__(self):
+        self.state = {"runs": [], "networks": []}
+        self.containers = self.Containers(self.state)
+        self.networks = self.Networks(self.state)
+
+    class Containers:
+        def __init__(self, state):
+            self.state = state
+
+        def run(self, image, **kwargs):
+            self.state["runs"].append({"image": image, **kwargs})
+            return SimpleNamespace(id=f"cid-{len(self.state['runs'])}", status="running")
+
+        def get(self, identifier):
+            for index, run in enumerate(self.state["runs"], start=1):
+                if identifier in (run.get("name"), f"cid-{index}"):
+                    return SimpleNamespace(id=f"cid-{index}", status="running",
+                                           stop=lambda timeout=10: None, remove=lambda force=False: None)
+            raise LookupError(identifier)
+
+    class Networks:
+        def __init__(self, state):
+            self.state = state
+
+        def create(self, name, **kwargs):
+            self.state["networks"].append(name)
+            return SimpleNamespace(id=f"nid-{len(self.state['networks'])}",
+                                   remove=lambda: self.state["networks"].remove(name))
+
+        def get(self, name):
+            if name in self.state["networks"]:
+                return SimpleNamespace(id=name, remove=lambda: self.state["networks"].remove(name))
+            raise LookupError(name)
 
 
 class PlatformTest(unittest.TestCase):
@@ -61,12 +101,12 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(response.status_code, code, (path, response.get_data(as_text=True)[:350]))
         return response
 
-    def contest(self, title="蓝域杯 · 测试赛", *, mode="puzzle", active=True, upcoming=False, cover=False):
+    def contest(self, title="蓝域杯 · 测试赛", *, mode="puzzle", active=True, upcoming=False, cover=False, **extra):
         now = datetime.now(self.app.config["TIME_ZONE"])
         start = now + timedelta(hours=1) if upcoming else now - timedelta(minutes=5)
         end = now + timedelta(hours=2)
         data = {"title": title, "mode": mode, "summary": "赛题与回合赛况", "start_at": start.strftime("%Y-%m-%dT%H:%M"),
-                "end_at": end.strftime("%Y-%m-%dT%H:%M")}
+                "end_at": end.strftime("%Y-%m-%dT%H:%M"), **extra}
         if mode == "round":
             data["round_minutes"] = "15"
         if cover:
@@ -314,6 +354,63 @@ class PlatformTest(unittest.TestCase):
                   layer=["", ""], title=["", ""], points=["100", "100"], flag=["", ""], code=400)
         self.assertEqual(len(self.lookup("SELECT id FROM breach_flags WHERE contest_id = ?", (contest_id,))), 3)
 
+    def test_breach_dynamic_environments(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest("农联云 · 动态靶场赛", mode="breach", env_image="iotmanage-dmz:1.0",
+                                  env_container_port="80", env_ttl_minutes="120", env_max="2")
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        other, other_team = self.player(contest_id, "packetlab", "PacketLab")
+        third, _ = self.player(contest_id, "nightowl", "NightOwl")
+        self.post(self.admin, "/manage/challenges/breach/new", contest_id=contest_id,
+                  layer=["边界突破", ""], title=["F1 备份泄露", "F3 上传 Getshell"],
+                  points=["100", "150"], flag=["", ""], description=["", ""], published="1")
+        self.assertIn("启动环境", player.get("/breach").get_data(as_text=True))
+
+        self.post(player, "/breach/env/start")
+        env = self.lookup("SELECT * FROM breach_environments WHERE team_id = ?", (team_id,))[0]
+        self.assertEqual((env["status"], env["host_port"], env["last_error"]), ("running", 8400, ""))
+        run = fake.state["runs"][0]
+        self.assertEqual(run["image"], "iotmanage-dmz:1.0")
+        self.assertEqual(run["ports"], {"80/tcp": 8400})
+        self.assertEqual(run["network"], "ctfenv-c%d-t%d-net" % (contest_id, team_id))
+        self.assertEqual(set(run["environment"]), {"FLAG_1", "FLAG_2"})
+        page = player.get("/breach").get_data(as_text=True)
+        self.assertIn(":8400</a>", page)
+
+        first_flag = env_flag_value(env["secret"], env["id"], 1)
+        self.assertEqual(run["environment"]["FLAG_1"], first_flag)
+        result = self.post(player, "/breach/flag", flag=first_flag, follow=True, code=200)
+        self.assertIn("本队获得 100 分", result.get_data(as_text=True))
+        # 别队的动态 Flag 对本队无效
+        other_post = self.post(other, "/breach/env/start")
+        self.assertEqual(fake.state["runs"][1]["ports"], {"80/tcp": 8401})
+        other_env = self.lookup("SELECT * FROM breach_environments WHERE team_id = ?", (other_team,))[0]
+        other_flag = env_flag_value(other_env["secret"], other_env["id"], 1)
+        self.assertNotEqual(other_flag, first_flag)
+        self.post(player, "/breach/flag", flag=other_flag, follow=True, code=200)
+        self.assertEqual([tuple(row) for row in self.lookup(
+            "SELECT verdict, points FROM breach_submissions WHERE team_id = ? ORDER BY id", (team_id,))],
+            [("correct", 100), ("incorrect", 0)])
+
+        # 并发上限：第三队被拒
+        self.post(third, "/breach/env/start", code=400)
+        # 停止后重启：secret 与端口不变，Flag 稳定
+        self.post(player, "/breach/env/stop")
+        self.post(player, "/breach/env/start")
+        restarted = self.lookup("SELECT * FROM breach_environments WHERE team_id = ?", (team_id,))[0]
+        self.assertEqual((restarted["secret"], restarted["host_port"]), (env["secret"], 8400))
+        result = self.post(player, "/breach/flag", flag=env_flag_value(env["secret"], env["id"], 2), follow=True, code=200)
+        self.assertIn("本队获得 150 分", result.get_data(as_text=True))
+        self.assertIn("<strong>250</strong>", player.get("/breach").get_data(as_text=True))
+
+        # TTL 过期由任意靶场访问惰性清理
+        with closing(connect(self.app.config["DATABASE"])) as db:
+            db.execute("UPDATE breach_environments SET expires_at = ? WHERE team_id = ?", (1, team_id))
+        self.assertIn("重启环境", player.get("/breach").get_data(as_text=True))
+        self.assertEqual(self.lookup("SELECT status FROM breach_environments WHERE team_id = ?", (team_id,))[0][0], "stopped")
+        self.assertEqual(self.lookup("SELECT COUNT(*) FROM breach_environments WHERE status = 'running'")[0][0], 1)
+
     def test_scheduled_access_and_persistence(self):
         contest_id = self.contest(upcoming=True)
         player, _ = self.player(contest_id, "bluefox", "BlueFox")
@@ -451,7 +548,7 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 4)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 5)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(len(self.lookup("SELECT id FROM round_tasks")), 2)

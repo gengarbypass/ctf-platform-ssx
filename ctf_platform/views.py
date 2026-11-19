@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import secrets
 import time
 
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
@@ -7,9 +8,10 @@ from werkzeug.security import check_password_hash
 
 from .db import get_db, transaction
 from .domain import (
-    CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, contest_schedule, contest_state, flag_digest, login_required,
-    local_time, round_segments, text_field,
+    CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, FormError, contest_schedule, contest_state, env_flag_value,
+    flag_digest, login_required, local_time, round_segments, text_field,
 )
+from .range import RangeError, start_environment, stop_environment
 from .queries import (
     breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
     patch_records, puzzle_player_rankings, puzzle_rankings, round_rankings, round_trend, score_records,
@@ -226,6 +228,45 @@ def submit_flag(puzzle_id):
     return redirect(url_for("site.puzzle", puzzle_id=puzzle_id), code=303)
 
 
+def environment_host():
+    configured = current_app.config["ENV_HOST"]
+    if configured:
+        return configured
+    return request.host.rsplit(":", 1)[0] if request.host else "127.0.0.1"
+
+
+def allocate_environment_port(db):
+    taken = {row[0] for row in db.execute("SELECT host_port FROM breach_environments WHERE host_port IS NOT NULL")}
+    port = current_app.config["ENV_PORT_START"]
+    while port in taken and port < 65535:
+        port += 1
+    return port
+
+
+def sweep_environments(db, now):
+    """惰性清理：过期或所属比赛不再进行中的环境；Docker 故障记入 error 不阻塞页面。"""
+    rows = db.execute(
+        """SELECT e.*, c.active, c.start_at, c.end_at FROM breach_environments e
+           JOIN contests c ON c.id = e.contest_id WHERE e.status IN ('starting', 'running')""",
+    ).fetchall()
+    for row in rows:
+        contest_live = row["active"] == 1 and row["start_at"] <= now < row["end_at"]
+        expired = row["expires_at"] is not None and row["expires_at"] <= now
+        if contest_live and not expired:
+            continue
+        try:
+            stop_environment(row["contest_id"], row["team_id"], container_id=row["container_id"])
+            with transaction(db, write=True):
+                db.execute(
+                    "UPDATE breach_environments SET status = 'stopped', stopped_at = ? WHERE id = ?", (now, row["id"]),
+                )
+        except RangeError as error:
+            with transaction(db, write=True):
+                db.execute(
+                    "UPDATE breach_environments SET status = 'error', last_error = ? WHERE id = ?", (str(error), row["id"]),
+                )
+
+
 @site.get("/breach")
 @login_required
 def breach():
@@ -254,8 +295,96 @@ def breach():
             "mine": breach_records(db, contest_id, team_id=g.team["id"], limit=10) if g.team else [],
             "standings": breach_rankings(db, contest_id),
         }
+        if g.contest["env_image"]:
+            sweep_environments(db, g.now)
+            environment = None
+            if g.team:
+                environment = db.execute(
+                    "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ?", (contest_id, g.team["id"]),
+                ).fetchone()
+            data["environment"] = environment
+            data["environment_host"] = environment_host()
     notice = session.pop("breach_notice", None)
     return render_template("breach.html", title="综合渗透", data=data, notice=notice)
+
+
+@site.post("/breach/env/start")
+@login_required
+def start_breach_environment():
+    db = get_db()
+    with transaction(db, write=True):
+        contest, team, now = live_context(db, "breach")
+        if not contest["env_image"]:
+            abort(404)
+        env = db.execute(
+            "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ?", (contest["id"], team["id"]),
+        ).fetchone()
+        if env and env["status"] == "running":
+            return redirect(url_for("site.breach"), code=303)
+        live_count = db.execute(
+            "SELECT COUNT(*) FROM breach_environments WHERE contest_id = ? AND status IN ('starting', 'running')",
+            (contest["id"],),
+        ).fetchone()[0]
+        if not env and live_count >= (contest["env_max"] or 20):
+            raise FormError("环境并发已达上限，请稍后重试或联系赛事人员。")
+        secret = env["secret"] if env else secrets.token_hex(32)
+        port = env["host_port"] if env and env["host_port"] else allocate_environment_port(db)
+        expires_at = now + (contest["env_ttl_minutes"] or 120) * 60
+        if env:
+            env_id = env["id"]
+            db.execute(
+                """UPDATE breach_environments SET secret = ?, host_port = ?, status = 'starting', last_error = '',
+                   expires_at = ?, container_id = '', network_id = '' WHERE id = ?""",
+                (secret, port, expires_at, env_id),
+            )
+        else:
+            env_id = db.execute(
+                """INSERT INTO breach_environments (contest_id, team_id, secret, host_port, status, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, 'starting', ?, ?)""",
+                (contest["id"], team["id"], secret, port, now, expires_at),
+            ).lastrowid
+        flag_ids = [row[0] for row in db.execute(
+            "SELECT id FROM breach_flags WHERE contest_id = ? AND published = 1 AND flag_digest = ''", (contest["id"],),
+        ).fetchall()]
+    flag_env = {f"FLAG_{flag_id}": env_flag_value(secret, env_id, flag_id) for flag_id in flag_ids}
+    error, container_id, network_id = "", "", ""
+    try:
+        container_id, network_id = start_environment(contest=contest, team=team, host_port=port, flag_env=flag_env)
+    except RangeError as failure:
+        error = str(failure)
+    with transaction(db, write=True):
+        if error:
+            db.execute(
+                "UPDATE breach_environments SET status = 'error', last_error = ?, stopped_at = ? WHERE id = ?",
+                (error, now, env_id),
+            )
+        else:
+            db.execute(
+                "UPDATE breach_environments SET status = 'running', container_id = ?, network_id = ?, started_at = ? WHERE id = ?",
+                (container_id, network_id, now, env_id),
+            )
+    return redirect(url_for("site.breach"), code=303)
+
+
+@site.post("/breach/env/stop")
+@login_required
+def stop_breach_environment():
+    db = get_db()
+    with transaction(db, write=True):
+        contest, team, now = live_context(db, "breach")
+        env = db.execute(
+            "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ?", (contest["id"], team["id"]),
+        ).fetchone()
+        if not env:
+            abort(404)
+        db.execute(
+            "UPDATE breach_environments SET status = 'stopped', stopped_at = ? WHERE id = ?", (now, env["id"]),
+        )
+    try:
+        stop_environment(contest["id"], team["id"], container_id=env["container_id"])
+    except RangeError:
+        pass
+    return redirect(url_for("site.breach"), code=303)
 
 
 @site.post("/breach/flag")
@@ -265,6 +394,7 @@ def submit_breach_flag():
     db = get_db()
     with transaction(db, write=True):
         contest, team, now = live_context(db, "breach")
+        sweep_environments(db, now)
         attempts = db.execute(
             "SELECT COUNT(*) FROM breach_submissions WHERE contest_id = ? AND team_id = ? AND submitted_at >= ?",
             (contest["id"], team["id"], now - 60),
@@ -276,9 +406,23 @@ def submit_breach_flag():
             (contest["id"],),
         ).fetchall()
         match = next(
-            (row for row in flags if hmac.compare_digest(row["flag_digest"], flag_digest(row["flag_salt"], value))),
+            (row for row in flags
+             if row["flag_digest"] and hmac.compare_digest(row["flag_digest"], flag_digest(row["flag_salt"], value))),
             None,
         )
+        if match is None and contest["env_image"]:
+            environment = db.execute(
+                """SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND status = 'running'
+                   AND (expires_at IS NULL OR expires_at > ?)""",
+                (contest["id"], team["id"], now),
+            ).fetchone()
+            if environment:
+                match = next(
+                    (row for row in flags
+                     if not row["flag_digest"]
+                     and hmac.compare_digest(env_flag_value(environment["secret"], environment["id"], row["id"]), value)),
+                    None,
+                )
         prior = db.execute(
             "SELECT 1 FROM breach_submissions WHERE flag_id = ? AND team_id = ? AND verdict = 'correct'",
             (match["id"], team["id"]),

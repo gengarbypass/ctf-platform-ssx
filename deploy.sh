@@ -129,9 +129,12 @@ if [[ -z $port ]]; then
 fi
 
 ecs_tmp=$(mktemp "$root/.env.ecs.XXXXXX")
-printf 'CTF_BIND_HOST=0.0.0.0\nCTF_PORT=%s\nCTF_COOKIE_SECURE=0\n' "$port" > "$ecs_tmp"
+docker_gid=$(getent group docker 2>/dev/null | cut -d: -f3)
+printf 'CTF_BIND_HOST=0.0.0.0\nCTF_PORT=%s\nCTF_COOKIE_SECURE=0\nCTF_DOCKER_GID=%s\n' \
+    "$port" "${docker_gid:-999}" > "$ecs_tmp"
 compose+=(--env-file "$ecs_tmp")
-export CTF_BIND_HOST=0.0.0.0 CTF_PORT="$port" CTF_COOKIE_SECURE=0
+export CTF_BIND_HOST=0.0.0.0 CTF_PORT="$port" CTF_COOKIE_SECURE=0 CTF_DOCKER_GID="${docker_gid:-999}"
+printf '%s\n' "提示：综合渗透动态环境使用 8400 起的端口段，请在安全组放行所需范围（如 8400-8500/TCP）。"
 
 revision=""
 if [[ -e "$root/.git" ]] && command -v git >/dev/null 2>&1; then

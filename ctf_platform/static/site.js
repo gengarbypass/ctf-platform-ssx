@@ -51,19 +51,32 @@ for (const form of document.querySelectorAll("[data-image-form]")) {
 
 const contestForm = document.querySelector("[data-contest-form]");
 const roundDuration = contestForm?.querySelector("[data-round-duration]");
-if (roundDuration) {
+const envConfig = contestForm?.querySelector("[data-env-config]");
+if (roundDuration || envConfig) {
   const mode = contestForm.elements.namedItem("mode");
   const minutes = contestForm.elements.namedItem("round_minutes");
-  function updateRoundDuration() {
-    const isRound = mode.value === "round";
-    roundDuration.hidden = !isRound;
-    minutes.disabled = !isRound;
-    minutes.required = isRound;
+  const envFields = envConfig ? [...envConfig.querySelectorAll("input")] : [];
+  function updateModeSections() {
+    if (roundDuration) {
+      const isRound = mode.value === "round";
+      roundDuration.hidden = !isRound;
+      minutes.disabled = !isRound;
+      minutes.required = isRound;
+    }
+    if (envConfig) {
+      const isBreach = mode.value === "breach";
+      envConfig.hidden = !isBreach;
+      for (const field of envFields) {
+        if (field.name === "env_image") continue;
+        field.disabled = !isBreach;
+        field.required = isBreach && field.name !== "env_image";
+      }
+    }
   }
   for (const choice of contestForm.querySelectorAll('input[name="mode"]')) {
-    choice.addEventListener("change", updateRoundDuration);
+    choice.addEventListener("change", updateModeSections);
   }
-  updateRoundDuration();
+  updateModeSections();
 }
 
 const breachRows = document.querySelector("[data-breach-rows]");

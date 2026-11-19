@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
+{% set dynamic_env = g.managed and g.managed.env_image %}
 {% macro breach_row(index=1) -%}
 <div class="arena-breach-row">
   <div class="arena-breach-row-head"><strong data-breach-row-label>靶点 {{ index }}</strong>
@@ -10,7 +11,7 @@
   </div>
   <div class="arena-two">
     {{ ui.field("靶点名称","title",max=100) }}
-    {{ ui.field("Flag","flag",max=256,placeholder="flag{…}") }}
+    {{ ui.field("Flag","flag",max=256,required=not dynamic_env,placeholder="启动环境时按队生成" if dynamic_env else "flag{…}") }}
   </div>
   {{ ui.description("靶点提示（选填）","description",rows=2,max=16000) }}
 </div>
@@ -39,7 +40,7 @@
           {{ ui.field("Flag","flag",type='password',max=256,placeholder="留空保留当前 Flag") }}
         </div>
       {% elif kind == 'breach' %}
-        <p class="arena-muted">综合靶场的每枚 Flag 对应一个靶点，可在此一次录入多行；「所属层级」留空时自动沿用上一行的层级。</p>
+        <p class="arena-muted">综合靶场的每枚 Flag 对应一个靶点，可在此一次录入多行；「所属层级」留空时自动沿用上一行的层级。{% if dynamic_env %}当前比赛已启用动态环境：Flag 留空即由平台在各队启动环境时生成并注入容器。{% endif %}</p>
         <div class="arena-breach-rows" data-breach-rows>
           <template data-breach-row>{{ breach_row() }}</template>
           {% for index in range(3) %}{{ breach_row(index + 1) }}{% endfor %}
