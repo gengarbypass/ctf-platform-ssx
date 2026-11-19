@@ -92,6 +92,37 @@ if (breachRows) {
   renumberBreachRows();
 }
 
+const probeBox = document.querySelector("[data-env-probe]");
+if (probeBox) {
+  const button = probeBox.querySelector("[data-probe-button]");
+  const result = probeBox.querySelector("[data-probe-result]");
+  const form = button.closest("form");
+  button.addEventListener("click", async () => {
+    const image = form.elements.namedItem("env_image").value.trim();
+    const port = form.elements.namedItem("env_container_port").value || "80";
+    const tokenInput = form.elements.namedItem("csrf_token");
+    button.disabled = true;
+    result.classList.remove("arena-positive", "arena-negative");
+    result.textContent = "正在检测：启动一次性容器并尝试连接端口（约需数秒）…";
+    try {
+      const response = await fetch("/manage/bank/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": tokenInput ? tokenInput.value : "" },
+        body: JSON.stringify({ env_image: image, env_container_port: port }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      result.textContent = data.message;
+      result.classList.add(data.ok ? "arena-positive" : "arena-negative");
+    } catch {
+      result.textContent = "检测请求失败，请稍后重试。";
+      result.classList.add("arena-negative");
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 const editor = document.querySelector("[data-brand-editor]");
 if (editor) {
   const preview = editor.querySelector("[data-brand-preview]");

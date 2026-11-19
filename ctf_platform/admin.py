@@ -3,7 +3,7 @@ import io
 import re
 import sqlite3
 
-from flask import Blueprint, abort, flash, g, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import generate_password_hash
 
 from .db import get_db, transaction
@@ -628,6 +628,24 @@ def contest_puzzle_remove(contest_id):
     return saved("赛题已移出比赛（题库保留，历史提交仍计入原成绩）。", "manage.contest_puzzles", contest_id=contest_id)
 
 
+@manage.post("/bank/probe")
+@admin_required
+def bank_probe():
+    """创建赛题页的「检测连通性」按钮：即时验证镜像可拉取且配置端口可访问，不落库。"""
+    data = request.get_json(silent=True) or {}
+    image = (data.get("env_image") or "").strip()
+    if not image or len(image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", image):
+        return jsonify(ok=False, message="请先填写合法的环境镜像名。")
+    try:
+        port = int(data.get("env_container_port"))
+    except (TypeError, ValueError):
+        return jsonify(ok=False, message="容器端口须为 1–65535 的整数。")
+    if not 1 <= port <= 65535:
+        return jsonify(ok=False, message="容器端口须为 1–65535 的整数。")
+    ok, reason = probe_image(image, port)
+    return jsonify(ok=ok, message="连接成功，镜像可拉取且端口可访问。" if ok else f"检测失败：{reason}")
+
+
 @manage.route("/bank/new", defaults={"task_id": None}, methods=["GET", "POST"])
 @manage.route("/bank/<int:task_id>/edit", methods=["GET", "POST"])
 @admin_required
@@ -658,9 +676,6 @@ def bank_edit(task_id):
         if len(env_image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", env_image):
             raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
         env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
-        ok, reason = probe_image(env_image, env_container_port)
-        if not ok:
-            raise FormError(f"镜像连接检测失败：{reason}")
     flag = text_field("flag", "Flag", 256, optional=True)
     if not task and not flag and not env_image:
         raise FormError("请填写 Flag；或在填写环境镜像后留空以按队伍动态生成。")
@@ -699,7 +714,7 @@ def bank_edit(task_id):
             db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
     if join_contest:
         return saved("赛题已保存并加入比赛。", "manage.contest_puzzles", contest_id=join_contest)
-    return saved("赛题已保存。" + ("镜像连接检测通过。" if env_image else ""), "manage.bank")
+    return saved("赛题已保存。", "manage.bank")
 
 
 @manage.route("/bank/<int:task_id>/delete", methods=["GET", "POST"])

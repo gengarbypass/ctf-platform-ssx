@@ -422,10 +422,10 @@ class PlatformTest(unittest.TestCase):
         contest_id = self.contest("蓝域杯 · 动态解题赛", mode="puzzle")
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")
         other, other_team = self.player(contest_id, "packetlab", "PacketLab")
-        with patch("ctf_platform.admin.probe_image", return_value=(True, "")):
-            self.post(self.admin, "/manage/bank/new", join_contest=contest_id,
-                      title="容器入口", category="Web", difficulty="入门", points=100,
-                      description="读取容器内 FLAG", env_image="nginx:alpine", env_container_port="80", published="1")
+        # 创建赛题：保存不触发检测；「检测连通性」按钮走独立接口
+        self.post(self.admin, "/manage/bank/new", join_contest=contest_id,
+                  title="容器入口", category="Web", difficulty="入门", points=100,
+                  description="读取容器内 FLAG", env_image="nginx:alpine", env_container_port="80", published="1")
         puzzle_id = self.lookup("SELECT id FROM puzzles WHERE env_image IS NOT NULL")[0][0]
         self.puzzle(contest_id)
         static_id = self.lookup(
@@ -468,16 +468,33 @@ class PlatformTest(unittest.TestCase):
         again = player.get(f"/challenges/{puzzle_id}").get_data(as_text=True)
         self.assertIn("重启环境", again)
         self.assertNotIn(":8400</a>", again)
-        # 编辑保留动态属性并更新镜像
-        with patch("ctf_platform.admin.probe_image", return_value=(True, "")):
-            self.post(self.admin, f"/manage/bank/{puzzle_id}/edit",
-                      title="容器入口", category="Web", difficulty="入门", points=120,
-                      description="同上", env_image="nginx:alpine", env_container_port="8080", published="1")
+        # 编辑保留动态属性并更新镜像（保存路径不做连通性检测）
+        self.post(self.admin, f"/manage/bank/{puzzle_id}/edit",
+                  title="容器入口", category="Web", difficulty="入门", points=120,
+                  description="同上", env_image="nginx:alpine", env_container_port="8080", published="1")
         row = self.lookup("SELECT points, env_image, env_container_port, flag_digest FROM puzzles WHERE id = ?", (puzzle_id,))[0]
         self.assertEqual((row["points"], row["env_image"], row["env_container_port"], row["flag_digest"]),
                          (120, "nginx:alpine", 8080, ""))
         # 比赛创建表单已瘦化：解题赛不再出现环境配置字段（改为默认值）
         self.assertNotIn("env_ttl_minutes", self.admin.get("/manage/contests/new").get_data(as_text=True))
+        # 检测连通性按钮接口：成功与失败两种结果
+        with patch("ctf_platform.admin.probe_image", return_value=(True, "")):
+            with self.admin.session_transaction() as session:
+                token = session["csrf"]
+            ok = self.admin.post("/manage/bank/probe", json={"env_image": "nginx:alpine", "env_container_port": 80},
+                                 headers={"X-CSRF-Token": token})
+            self.assertTrue(ok.json["ok"])
+            self.assertIn("连接成功", ok.json["message"])
+        with patch("ctf_platform.admin.probe_image", return_value=(False, "端口 80 连接失败")):
+            bad = self.admin.post("/manage/bank/probe", json={"env_image": "nginx:alpine", "env_container_port": 80},
+                                  headers={"X-CSRF-Token": token})
+            self.assertFalse(bad.json["ok"])
+            self.assertIn("检测失败", bad.json["message"])
+        invalid = self.admin.post("/manage/bank/probe", json={"env_image": "", "env_container_port": 80},
+                                  headers={"X-CSRF-Token": token})
+        self.assertFalse(invalid.json["ok"])
+        # 表单中存在检测按钮与状态区
+        self.assertIn("检测连通性", self.admin.get("/manage/bank/new").get_data(as_text=True))
 
     def test_import_users_and_teams(self):
         contest_id = self.contest("导入验证赛", active=False)
