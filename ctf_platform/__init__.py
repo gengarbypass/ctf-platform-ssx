@@ -62,6 +62,7 @@ def create_app(overrides=None):
         raise RuntimeError("CTF_SECRET_KEY 至少需要 32 个字符。")
     app.config["TIME_ZONE"] = ZoneInfo(app.config["TIME_ZONE"])
     app.config["DATABASE"] = str(Path(app.config["DATA_DIR"]).resolve() / "arena.sqlite3")
+    asset_version = f"?v={app.config['BUILD_REVISION'][:12]}" if app.config["BUILD_REVISION"] else ""
     initialize(app)
     app.config["ADMIN_PASSWORD"] = ""
     app.config["DUMMY_PASSWORD_HASH"] = generate_password_hash(secrets.token_urlsafe(24))
@@ -118,6 +119,7 @@ def create_app(overrides=None):
             "score_kinds": SCORE_KINDS,
             "env_statuses": ENV_STATUSES,
             "timezone": app.config["TIME_ZONE"].key,
+            "asset_version": asset_version,
             "signed": lambda value: f"{value:+,}",
         }
 

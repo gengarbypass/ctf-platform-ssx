@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title }} · {{ g.brand.name if g.brand else '蓝域 CTF' }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='arena.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='arena.css') }}{{ asset_version }}">
   {% if g.brand and g.brand.logo_id %}<link rel="icon" href="{{ url_for('site.image', file_id=g.brand.logo_id) }}">{% endif %}
   {% block head_extra %}{% endblock %}
 </head>
@@ -79,7 +79,7 @@
   </div>
   {% endblock %}
 </div>
-<script src="{{ url_for('static', filename='site.js') }}" defer></script>
+<script src="{{ url_for('static', filename='site.js') }}{{ asset_version }}" defer></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
