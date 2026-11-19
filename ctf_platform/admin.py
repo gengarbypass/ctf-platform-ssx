@@ -85,7 +85,7 @@ def overview():
         contest_id = g.managed["id"]
         mode = g.managed["mode"]
         table = CHALLENGE_TABLES[mode]
-        metrics["teams"] = db.execute("SELECT COUNT(*) FROM teams WHERE contest_id = ?", (contest_id,)).fetchone()[0]
+        metrics["teams"] = db.execute("SELECT COUNT(*) FROM contest_teams WHERE contest_id = ?", (contest_id,)).fetchone()[0]
         if mode == "puzzle":
             metrics["challenges"] = db.execute(
                 """SELECT COUNT(*) FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
@@ -175,11 +175,31 @@ def contest_edit(contest_id):
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (*values, g.now),
             ).lastrowid
+            # 新比赛自动沿用最近一场比赛的队伍与分队，避免重复配置
+            src = db.execute(
+                "SELECT contest_id FROM contest_teams WHERE contest_id != ? ORDER BY contest_id DESC LIMIT 1",
+                (contest_id,),
+            ).fetchone()
+            carried = 0
+            if src:
+                db.execute(
+                    "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) SELECT ?, team_id FROM contest_teams WHERE contest_id = ?",
+                    (contest_id, src["contest_id"]),
+                )
+                db.execute(
+                    """INSERT OR IGNORE INTO memberships (contest_id, user_id, team_id)
+                       SELECT ?, user_id, team_id FROM memberships WHERE contest_id = ?""",
+                    (contest_id, src["contest_id"]),
+                )
+                carried = db.execute(
+                    "SELECT COUNT(DISTINCT team_id) FROM contest_teams WHERE contest_id = ?", (contest_id,),
+                ).fetchone()[0]
         if old_cover_id is not None and cover_id != old_cover_id:
             db.execute("DELETE FROM uploads WHERE id = ?", (old_cover_id,))
     session["manage_contest_id"] = contest_id
     if not contest:
-        return saved("比赛已创建，可以开始筹备赛题。", "manage.challenges", kind=mode)
+        note = f"已沿用此前比赛的 {carried} 支队伍与选手分队，可在「队伍管理」调整。" if carried else ""
+        return saved("比赛已创建，可以开始筹备赛题。" + note, "manage.challenges", kind=mode)
     return saved("比赛配置已保存。", "manage.contests")
 
 
@@ -220,6 +240,8 @@ def contest_delete(contest_id):
     with transaction(db, write=True):
         require_current_admin(db)
         env_rows = db.execute("SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE contest_id = ?", (contest_id,)).fetchall()
+        for table in ("flag_submissions", "patches", "score_events", "service_states", "breach_submissions", "breach_environments"):
+            db.execute(f"DELETE FROM {table} WHERE contest_id = ?", (contest_id,))
         if not db.execute("DELETE FROM contests WHERE id = ?", (contest_id,)).rowcount:
             abort(404)
     purge_environments(env_rows)
@@ -384,7 +406,7 @@ def import_teams():
     data = _csv_rows(request.files.get("file"), ["队伍", "账号", "显示名", "密码"])
     with transaction(db, write=True):
         team_ids = {}
-        for row in db.execute("SELECT id, name FROM teams WHERE contest_id = ?", (contest_id,)):
+        for row in db.execute("SELECT id, name FROM teams"):
             team_ids[row["name"]] = row["id"]
         users = {row["username"]: row["id"] for row in db.execute("SELECT id, username FROM users")}
         teams_created, users_created, assigned = 0, 0, 0
@@ -395,10 +417,12 @@ def import_teams():
             if not team_name or len(team_name) > 50:
                 raise FormError(f"第 {number} 行队伍名须为 1–50 个字符。")
             if team_name not in team_ids:
-                team_ids[team_name] = db.execute(
-                    "INSERT INTO teams (contest_id, name) VALUES (?, ?)", (contest_id, team_name),
-                ).lastrowid
+                team_ids[team_name] = db.execute("INSERT INTO teams (name) VALUES (?)", (team_name,)).lastrowid
                 teams_created += 1
+            db.execute(
+                "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) VALUES (?, ?)",
+                (contest_id, team_ids[team_name]),
+            )
             username = row[1].strip().lower()
             if not username:
                 continue
@@ -416,6 +440,10 @@ def import_teams():
                 ).lastrowid
                 users[username] = user_id
                 users_created += 1
+            db.execute(
+                "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) VALUES (?, ?)",
+                (contest_id, team_ids[team_name]),
+            )
             db.execute(
                 """INSERT INTO memberships (contest_id, user_id, team_id) VALUES (?, ?, ?)
                    ON CONFLICT(contest_id, user_id) DO UPDATE SET team_id = excluded.team_id""",
@@ -463,8 +491,13 @@ def teams():
         db = get_db()
         contest_id = g.managed["id"]
         rows = db.execute(
-            """SELECT t.*, COUNT(m.user_id) AS members FROM teams t LEFT JOIN memberships m ON m.team_id = t.id
-               WHERE t.contest_id = ? GROUP BY t.id ORDER BY t.name COLLATE NOCASE""", (contest_id,),
+            """SELECT t.id, t.name,
+                      (ct.team_id IS NOT NULL) AS in_contest,
+                      (SELECT COUNT(*) FROM memberships m WHERE m.team_id = t.id AND m.contest_id = ?) AS members,
+                      (SELECT GROUP_CONCAT(c.title, '、') FROM contest_teams ct2
+                         JOIN contests c ON c.id = ct2.contest_id WHERE ct2.team_id = t.id) AS contests
+               FROM teams t LEFT JOIN contest_teams ct ON ct.team_id = t.id AND ct.contest_id = ?
+               GROUP BY t.id ORDER BY t.name COLLATE NOCASE""", (contest_id, contest_id),
         ).fetchall()
         players = db.execute(
             """SELECT u.id, u.username, u.display_name, m.team_id, t.name AS team_name
@@ -478,47 +511,79 @@ def teams():
     return render_template("manage/teams.html", title=title, rows=rows, players=players, matrix=matrix, events=events)
 
 
+@manage.post("/contests/<int:contest_id>/teams/add")
+@admin_required
+def contest_team_add(contest_id):
+    team_id = integer_field("team_id", "队伍", 1, 2**63 - 1)
+    db = get_db()
+    with transaction(db, write=True):
+        if not db.execute("SELECT 1 FROM contests WHERE id = ?", (contest_id,)).fetchone():
+            abort(404)
+        if not db.execute("SELECT 1 FROM teams WHERE id = ?", (team_id,)).fetchone():
+            abort(404)
+        db.execute(
+            "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) VALUES (?, ?)", (contest_id, team_id),
+        )
+    return saved("队伍已加入比赛。", "manage.teams")
+
+
+@manage.post("/contests/<int:contest_id>/teams/remove")
+@admin_required
+def contest_team_remove(contest_id):
+    team_id = integer_field("team_id", "队伍", 1, 2**63 - 1)
+    db = get_db()
+    with transaction(db, write=True):
+        if not db.execute("SELECT 1 FROM contests WHERE id = ?", (contest_id,)).fetchone():
+            abort(404)
+        db.execute("DELETE FROM contest_teams WHERE contest_id = ? AND team_id = ?", (contest_id, team_id))
+        db.execute("DELETE FROM memberships WHERE contest_id = ? AND team_id = ?", (contest_id, team_id))
+    return saved("队伍已移出本场比赛（名册保留，可再次加入）。", "manage.teams")
+
+
 @manage.route("/teams/new", defaults={"team_id": None}, methods=["GET", "POST"])
 @manage.route("/teams/<int:team_id>/edit", methods=["GET", "POST"])
 @admin_required
 def team_edit(team_id):
     contest_id = managed_id()
-    team = scoped_record("teams", team_id, contest_id) if team_id is not None else None
+    db = get_db()
+    team = db.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone() if team_id is not None else None
+    if team_id is not None and not team:
+        abort(404)
     if request.method == "GET":
         return render_template("manage/team_form.html", title="编辑队伍" if team else "创建队伍", team=team)
     name = text_field("name", "队名", 50)
-    db = get_db()
-    try:
-        with transaction(db, write=True):
-            managed_id()
-            if team:
-                updated = db.execute(
-                    "UPDATE teams SET name = ? WHERE id = ? AND contest_id = ?", (name, team_id, contest_id),
-                )
-                if not updated.rowcount:
-                    abort(404)
-            else:
-                db.execute("INSERT INTO teams (contest_id, name) VALUES (?, ?)", (contest_id, name))
-    except sqlite3.IntegrityError as error:
-        raise FormError("当前比赛已有同名队伍。") from error
-    return saved("队伍已保存。", "manage.teams")
+    with transaction(db, write=True):
+        managed_id()
+        if team:
+            db.execute("UPDATE teams SET name = ? WHERE id = ?", (name, team_id))
+        else:
+            # 队伍为全局名册：同名即复用同一支队伍（幂等），并加入当前比赛
+            existing = db.execute("SELECT id FROM teams WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+            team_id = existing["id"] if existing else db.execute(
+                "INSERT INTO teams (name) VALUES (?)", (name,),
+            ).lastrowid
+        db.execute(
+            "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) VALUES (?, ?)", (contest_id, team_id),
+        )
+    return saved("队伍已保存并加入当前比赛。", "manage.teams")
 
 
 @manage.route("/teams/<int:team_id>/delete", methods=["GET", "POST"])
 @admin_required
 def team_delete(team_id):
-    contest_id = managed_id()
     db = get_db()
+    team = db.execute("SELECT id, name FROM teams WHERE id = ?", (team_id,)).fetchone()
+    if not team:
+        abort(404)
     if request.method == "GET":
-        team = scoped_record("teams", team_id, contest_id)
         return render_template(
             "manage/delete.html", title="删除队伍", subject=team["name"], scoped=True, back=url_for("manage.teams"),
-            impact="将删除此队伍的提交、积分和服务状态，并解除成员分队。",
+            impact="队伍为全局名册：将从所有比赛中移除并解除成员分队，同时删除其全部提交、补丁、积分、服务状态与环境容器。",
         )
     with transaction(db, write=True):
         require_current_admin(db)
         env_rows = db.execute("SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE team_id = ?", (team_id,)).fetchall()
-        if not db.execute("DELETE FROM teams WHERE id = ? AND contest_id = ?", (team_id, contest_id)).rowcount:
+        if not db.execute("DELETE FROM teams WHERE id = ?", (team_id,)).rowcount:
             abort(404)
     purge_environments(env_rows)
     return saved("队伍已删除。", "manage.teams")
@@ -540,10 +605,15 @@ def membership():
         if team_id is None:
             db.execute("DELETE FROM memberships WHERE contest_id = ? AND user_id = ?", (contest_id, user_id))
         else:
-            scoped_record("teams", team_id, contest_id)
+            if not db.execute("SELECT 1 FROM teams WHERE id = ?", (team_id,)).fetchone():
+                abort(404)
             db.execute(
                 """INSERT INTO memberships (contest_id, user_id, team_id) VALUES (?, ?, ?)
-                   ON CONFLICT(contest_id, user_id) DO UPDATE SET team_id = excluded.team_id""", (contest_id, user_id, team_id),
+                   ON CONFLICT(contest_id, user_id) DO UPDATE SET team_id = excluded.team_id""",
+                (contest_id, user_id, team_id),
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) VALUES (?, ?)", (contest_id, team_id),
             )
     return saved("参赛账号的队伍已更新。", "manage.teams")
 
@@ -864,7 +934,8 @@ def update_status():
     with transaction(db, write=True):
         require_current_admin(db)
         managed_id("round")
-        scoped_record("teams", team_id, contest_id)
+        if not db.execute("SELECT 1 FROM teams WHERE id = ?", (team_id,)).fetchone():
+            abort(404)
         scoped_record("round_tasks", task_id, contest_id)
         db.execute(
             """INSERT INTO service_states VALUES (?, ?, ?, ?, ?, ?)
@@ -893,7 +964,8 @@ def record_score():
         if delta == 0:
             raise FormError("分数变化不能为 0。")
         round_no = integer_field("round_no", "回合", 1, state["round"])
-        scoped_record("teams", team_id, contest_id)
+        if not db.execute("SELECT 1 FROM teams WHERE id = ?", (team_id,)).fetchone():
+            abort(404)
         add_score(db, contest_id=contest_id, team_id=team_id, kind=kind, delta=delta, round_no=round_no, reason=reason,
                   actor_id=g.user["id"], now=g.now)
     return saved("得分变化已写入计分流水。", "manage.teams")

@@ -511,7 +511,8 @@ class PlatformTest(unittest.TestCase):
                      "极光战队,,,\n")
         self.post(self.admin, "/manage/import/teams", contest_id=contest_id,
                   file=(io.BytesIO(teams_csv.encode("utf-8")), "teams.csv"))
-        self.assertEqual(len(self.lookup("SELECT id FROM teams WHERE contest_id = ?", (contest_id,))), 2)
+        self.assertEqual(len(self.lookup(
+            "SELECT team_id FROM contest_teams WHERE contest_id = ?", (contest_id,))), 2)
         self.assertEqual(len(self.lookup("SELECT id FROM users WHERE username = 'fox03'")), 1)
         memberships = self.lookup("SELECT team_id, user_id FROM memberships WHERE contest_id = ?", (contest_id,))
         self.assertEqual(len(memberships), 2)
@@ -528,6 +529,20 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, f"/manage/contests/{contest_id}/puzzles/remove", puzzle_id=bank_id)
         self.assertEqual(self.lookup("SELECT COUNT(*) FROM contest_puzzles WHERE puzzle_id = ?", (bank_id,))[0][0], 0)
         self.assertEqual(self.lookup("SELECT id FROM puzzles WHERE id = ?", (bank_id,))[0][0], bank_id)
+
+        # 新建比赛自动沿用上一场比赛的队伍与分队，无需重新配置
+        from datetime import timedelta
+        now = datetime.now()
+        self.post(self.admin, "/manage/contests/new", mode="puzzle", title="沿用验证赛",
+                  start_at=(now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"),
+                  end_at=(now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M"))
+        carried_id = self.lookup("SELECT id FROM contests WHERE title = '沿用验证赛'")[0][0]
+        self.assertEqual(
+            self.lookup("SELECT COUNT(*) FROM contest_teams WHERE contest_id = ?", (carried_id,))[0][0], 2)
+        carried = self.lookup(
+            """SELECT m.user_id FROM memberships m JOIN users u ON u.id = m.user_id
+               WHERE m.contest_id = ? AND u.username = 'fox01'""", (carried_id,))
+        self.assertEqual(len(carried), 1)
 
     def test_scheduled_access_and_persistence(self):
         contest_id = self.contest(upcoming=True)
@@ -668,7 +683,7 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 7)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 8)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(self.lookup("SELECT contest_id FROM contest_puzzles")[0][0], mixed)
@@ -715,8 +730,9 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual([row["id"] for row in self.lookup("SELECT id FROM contests")], [other_id])
         self.assertEqual([row["contest_id"] for row in self.lookup("SELECT contest_id FROM contest_puzzles")], [other_id])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 2)
-        self.assertEqual(self.lookup("SELECT * FROM teams WHERE id = ?", (team_id,)), [])
-        self.assertEqual(self.lookup("SELECT * FROM memberships"), [])
+        # 队伍为全局名册：删除比赛不影响队伍本身；分队只保留在未删除的比赛中
+        self.assertEqual(self.lookup("SELECT id FROM teams WHERE id = ?", (team_id,))[0][0], team_id)
+        self.assertEqual([row["contest_id"] for row in self.lookup("SELECT contest_id FROM memberships")], [other_id])
         self.assertEqual(self.lookup("SELECT * FROM flag_submissions"), [])
         self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id = ?", (cover_id,)), [])
         self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id = ?", (file_id,))[0][0], file_id)
@@ -737,7 +753,6 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, "/manage/services/status", contest_id=contest_id, team_id=team_id, task_id=task_id, status="healthy")
         route = f"/manage/teams/{team_id}/delete"
         self.assertIn("解除成员分队", self.admin.get(route).get_data(as_text=True))
-        self.post(self.admin, route, contest_id=contest_id + 1, code=400)
         self.post(self.admin, route, contest_id=contest_id)
 
         self.assertEqual([row["id"] for row in self.lookup("SELECT id FROM teams")], [other_id])

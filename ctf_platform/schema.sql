@@ -61,19 +61,22 @@ CREATE INDEX IF NOT EXISTS login_failures_recent ON login_failures(principal, oc
 
 CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+
+CREATE TABLE IF NOT EXISTS contest_teams (
     contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
-    name TEXT NOT NULL COLLATE NOCASE,
-    UNIQUE (contest_id, name),
-    UNIQUE (contest_id, id)
+    team_id INTEGER NOT NULL,
+    UNIQUE (contest_id, team_id)
 );
 
 CREATE TABLE IF NOT EXISTS memberships (
-    contest_id INTEGER NOT NULL,
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    team_id INTEGER NOT NULL,
-    PRIMARY KEY (contest_id, user_id),
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE
+    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    PRIMARY KEY (contest_id, user_id)
 );
+CREATE INDEX IF NOT EXISTS memberships_team ON memberships(team_id);
 
 CREATE TABLE IF NOT EXISTS puzzles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,9 +116,8 @@ CREATE TABLE IF NOT EXISTS flag_submissions (
     points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
     submitted_at INTEGER NOT NULL,
     FOREIGN KEY (puzzle_id) REFERENCES puzzles(id) ON DELETE CASCADE,
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
-CREATE UNIQUE INDEX IF NOT EXISTS one_flag_award ON flag_submissions(puzzle_id, team_id) WHERE verdict = 'correct';
 CREATE INDEX IF NOT EXISTS flags_team ON flag_submissions(contest_id, team_id, id DESC);
 CREATE INDEX IF NOT EXISTS flags_team_recent ON flag_submissions(contest_id, team_id, submitted_at);
 CREATE INDEX IF NOT EXISTS flags_contest ON flag_submissions(contest_id, id DESC);
@@ -144,7 +146,7 @@ CREATE TABLE IF NOT EXISTS breach_submissions (
     points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
     submitted_at INTEGER NOT NULL,
     FOREIGN KEY (contest_id, flag_id) REFERENCES breach_flags(contest_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_breach_award ON breach_submissions(flag_id, team_id) WHERE verdict = 'correct';
 CREATE INDEX IF NOT EXISTS breach_team ON breach_submissions(contest_id, team_id, id DESC);
@@ -166,9 +168,10 @@ CREATE TABLE IF NOT EXISTS breach_environments (
     started_at INTEGER,
     stopped_at INTEGER,
     expires_at INTEGER,
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
     UNIQUE (contest_id, team_id, puzzle_id)
 );
+
 CREATE UNIQUE INDEX IF NOT EXISTS one_env_port ON breach_environments(host_port) WHERE host_port IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS round_tasks (
@@ -190,7 +193,7 @@ CREATE TABLE IF NOT EXISTS service_states (
     updated_at INTEGER NOT NULL,
     updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     PRIMARY KEY (team_id, task_id),
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
     FOREIGN KEY (contest_id, task_id) REFERENCES round_tasks(contest_id, id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS states_contest ON service_states(contest_id);
@@ -210,7 +213,7 @@ CREATE TABLE IF NOT EXISTS patches (
     submitted_at INTEGER NOT NULL,
     reviewed_at INTEGER,
     reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
     FOREIGN KEY (contest_id, task_id) REFERENCES round_tasks(contest_id, id) ON DELETE CASCADE,
     UNIQUE (contest_id, id)
 );
@@ -228,7 +231,7 @@ CREATE TABLE IF NOT EXISTS score_events (
     patch_id INTEGER,
     occurred_at INTEGER NOT NULL,
     actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
     FOREIGN KEY (contest_id, patch_id) REFERENCES patches(contest_id, id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS scores_contest ON score_events(contest_id, id DESC);

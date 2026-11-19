@@ -6,19 +6,27 @@
     {% if g.managed %}{{ ui.link("创建队伍", url_for('manage.team_edit'), "primary", "plus") }}{% else %}{{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}{% endif %}
   {% endcall %}
   {% if g.managed %}
-    {% call ui.panel("参赛队伍") %}
+    {% call ui.panel("队伍名册") %}
+      <p class="arena-muted">队伍为全局名册，可跨比赛复用；下方「本比赛」标记表示已加入当前比赛。创建比赛时已自动沿用上一场比赛的队伍与分队。</p>
       {% if rows %}
-      <div class="arena-table-wrap"><table class="arena-table"><caption>参赛队伍</caption>
-        <thead><tr><th scope="col">队伍</th><th scope="col">账号数量</th><th scope="col">操作</th></tr></thead>
+      <div class="arena-table-wrap"><table class="arena-table"><caption>队伍名册</caption>
+        <thead><tr><th scope="col">队伍</th><th scope="col">本比赛成员</th><th scope="col">所属比赛</th><th scope="col">本比赛</th><th scope="col">操作</th></tr></thead>
         <tbody>{% for row in rows %}<tr>
           <td><strong>{{ row.name }}</strong></td><td>{{ row.members }}</td>
+          <td><small class="arena-muted">{{ row.contests or '—' }}</small></td>
+          <td>{{ ui.pill("已加入", "success") if row.in_contest else ui.pill("未加入", "neutral") }}</td>
           <td><div class="arena-actions">
+            {% if row.in_contest %}
+            <form action="{{ url_for('manage.contest_team_remove', contest_id=g.managed.id) }}" method="post">{{ ui.csrf() }}<input type="hidden" name="team_id" value="{{ row.id }}"><button class="arena-link" type="submit">移出本比赛</button></form>
+            {% else %}
+            <form action="{{ url_for('manage.contest_team_add', contest_id=g.managed.id) }}" method="post">{{ ui.csrf() }}<input type="hidden" name="team_id" value="{{ row.id }}"><button class="arena-link" type="submit">加入本比赛</button></form>
+            {% endif %}
             {{ ui.link("编辑",url_for('manage.team_edit',team_id=row.id),"link") }}
             {{ ui.link("删除队伍",url_for('manage.team_delete',team_id=row.id),"danger-outline") }}
           </div></td>
         </tr>{% endfor %}</tbody>
       </table></div>
-      {% else %}{{ ui.empty("暂无参赛队伍。") }}{% endif %}
+      {% else %}{{ ui.empty("名册为空，点击「创建队伍」或「批量导入」建立队伍。") }}{% endif %}
     {% endcall %}
     {% call ui.panel("参赛账号分队") %}
       {% if players %}

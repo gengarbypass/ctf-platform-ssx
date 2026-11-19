@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
     "contest_puzzles", "breach_flags", "breach_submissions", "breach_environments",
@@ -147,6 +147,39 @@ def prepare_schema(connection):
                 add_column(connection, "puzzles", "env_container_port INTEGER")
             if version == 5:
                 add_column(connection, "breach_environments", "puzzle_id INTEGER NOT NULL DEFAULT 0")
+            if 1 <= version <= 7:
+                # 队伍全局化：同名队伍合并到最早创建的一支，所有引用重定向；
+                # 随后把旧"比赛私有队伍"登记为参赛关联（重建后 teams 不再带 contest_id）。
+                cols = table_columns(connection, "teams")
+                if cols and "contest_id" in cols:
+                    keeps, merges = {}, []
+                    for row in connection.execute("SELECT id, name FROM teams ORDER BY id"):
+                        key = row["name"].strip().casefold()
+                        if key in keeps:
+                            merges.append((row["id"], keeps[key]))
+                        else:
+                            keeps[key] = row["id"]
+                    for dup, keep in merges:
+                        connection.execute(
+                            """DELETE FROM memberships WHERE team_id = ? AND (contest_id, user_id) IN
+                               (SELECT contest_id, user_id FROM memberships WHERE team_id = ?)""", (dup, keep),
+                        )
+                        connection.execute("UPDATE memberships SET team_id = ? WHERE team_id = ?", (keep, dup))
+                        for table in ("flag_submissions", "patches", "score_events", "breach_environments"):
+                            connection.execute(f"UPDATE {table} SET team_id = ? WHERE team_id = ?", (keep, dup))
+                        connection.execute(
+                            """DELETE FROM service_states WHERE team_id = ? AND task_id IN
+                               (SELECT task_id FROM service_states WHERE team_id = ?)""", (dup, keep),
+                        )
+                        connection.execute("UPDATE service_states SET team_id = ? WHERE team_id = ?", (keep, dup))
+                        connection.execute("DELETE FROM teams WHERE id = ?", (dup,))
+                    connection.execute("""CREATE TABLE IF NOT EXISTS contest_teams (
+                        contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+                        team_id INTEGER NOT NULL,
+                        UNIQUE (contest_id, team_id))""")
+                    connection.execute(
+                        "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) "
+                        "SELECT contest_id, id FROM teams WHERE contest_id IS NOT NULL")
             schema = tuple(schema_statements())
             if version:
                 rebuild_tables(connection, schema)

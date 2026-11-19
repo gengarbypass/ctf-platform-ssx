@@ -7,10 +7,11 @@ PLAYER_BOARD_LIMIT = 10
 def puzzle_rankings(db, contest_id):
     return db.execute(
         """SELECT t.id, t.name, COUNT(f.id) AS solved, COALESCE(SUM(f.points), 0) AS points
-           FROM teams t LEFT JOIN flag_submissions f ON f.contest_id = t.contest_id AND f.team_id = t.id AND f.verdict = 'correct'
-           WHERE t.contest_id = ? GROUP BY t.id
+           FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
+           LEFT JOIN flag_submissions f ON f.contest_id = ? AND f.team_id = t.id AND f.verdict = 'correct'
+           WHERE ct.contest_id = ? GROUP BY t.id
            ORDER BY points DESC, t.name COLLATE NOCASE, t.id""",
-        (contest_id,),
+        (contest_id, contest_id),
     ).fetchall()
 
 
@@ -43,10 +44,11 @@ def patch_player_rankings(db, contest_id):
 def breach_rankings(db, contest_id):
     return db.execute(
         """SELECT t.id, t.name, COUNT(b.id) AS solved, COALESCE(SUM(b.points), 0) AS points
-           FROM teams t LEFT JOIN breach_submissions b ON b.contest_id = t.contest_id AND b.team_id = t.id AND b.verdict = 'correct'
-           WHERE t.contest_id = ? GROUP BY t.id
+           FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
+           LEFT JOIN breach_submissions b ON b.contest_id = ? AND b.team_id = t.id AND b.verdict = 'correct'
+           WHERE ct.contest_id = ? GROUP BY t.id
            ORDER BY points DESC, solved DESC, t.name COLLATE NOCASE, t.id""",
-        (contest_id,),
+        (contest_id, contest_id),
     ).fetchall()
 
 
@@ -82,15 +84,19 @@ def round_rankings(db, contest_id):
               COALESCE(SUM(CASE WHEN s.kind = 'defense' THEN s.delta ELSE 0 END), 0) AS defense,
               COALESCE(SUM(CASE WHEN s.kind = 'uptime' THEN s.delta ELSE 0 END), 0) AS uptime,
               COALESCE(SUM(s.delta), 0) AS points
-           FROM teams t LEFT JOIN score_events s ON s.contest_id = t.contest_id AND s.team_id = t.id
-           WHERE t.contest_id = ? GROUP BY t.id
+           FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
+           LEFT JOIN score_events s ON s.contest_id = ? AND s.team_id = t.id
+           WHERE ct.contest_id = ? GROUP BY t.id
            ORDER BY points DESC, t.name COLLATE NOCASE, t.id""",
-        (contest_id,),
+        (contest_id, contest_id),
     ).fetchall()
 
 
 def team_list(db, contest_id):
-    return db.execute("SELECT * FROM teams WHERE contest_id = ? ORDER BY name COLLATE NOCASE, id", (contest_id,)).fetchall()
+    return db.execute(
+        """SELECT t.* FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
+           WHERE ct.contest_id = ? ORDER BY t.name COLLATE NOCASE, t.id""", (contest_id,),
+    ).fetchall()
 
 
 def service_matrix(db, contest_id, *, public=True):
