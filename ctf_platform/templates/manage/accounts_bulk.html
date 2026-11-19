@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回账号管理", url_for('manage.accounts'), "link", "back") }}</div>
+  {% call ui.heading("批量删除账号", "请核对所选账号后确认删除。") %}
+  {% endcall %}
+  {% call ui.panel("待删除账号") %}
+    <form class="arena-form" method="post" action="{{ url_for('manage.accounts_bulk_delete') }}">
+      {{ ui.csrf() }}
+      {% for id in ids %}<input type="hidden" name="select" value="{{ id }}">{% endfor %}
+      <input type="hidden" name="stage" value="execute">
+      <div class="arena-table-wrap"><table class="arena-table"><caption>已选账号（{{ accounts|length }} 个）</caption>
+        <thead><tr><th scope="col">登录账号</th><th scope="col">显示名称</th><th scope="col">权限</th><th scope="col">状态</th></tr></thead>
+        <tbody>{% for row in accounts %}<tr>
+          <td class="arena-mono">{{ row.username }}</td><td><strong>{{ row.display_name }}</strong></td>
+          <td>{{ "赛事管理" if row.role == 'admin' else "参赛" }}</td>
+          <td>{{ ui.pill("启用" if row.enabled else "停用", "success" if row.enabled else "neutral") }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      <p class="arena-muted">将删除以上账号并解除其分队；已有提交继续计入原队伍成绩。此操作不可恢复。</p>
+      <div class="arena-actions">
+        <button class="arena-btn danger-outline" type="submit">确认删除 {{ accounts|length }} 个账号</button>
+        {{ ui.link("取消", url_for('manage.accounts'), "link", "back") }}
+      </div>
+    </form>
+  {% endcall %}
+{% endblock %}

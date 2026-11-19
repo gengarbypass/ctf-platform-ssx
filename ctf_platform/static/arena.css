@@ -396,8 +396,10 @@ body { margin: 0; background: #f2f5fb; }
 #lanyu-arena .arena-tabs a[aria-current="page"] { border-color: var(--arena-blue); }
 #lanyu-arena .arena-pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 #lanyu-arena .arena-form-narrow { max-width: 760px; }
-#lanyu-arena .arena-checkbox { display: inline-flex; align-items: center; gap: 7px; color: var(--arena-ink); font-size: 12px; }
-#lanyu-arena .arena-checkbox input { accent-color: var(--arena-blue); }
+  #lanyu-arena .arena-checkbox { display: inline-flex; align-items: center; gap: 7px; color: var(--arena-ink); font-size: 12px; }
+  #lanyu-arena .arena-checkbox input { accent-color: var(--arena-blue); }
+  #lanyu-arena .arena-check { width: 34px; text-align: center; }
+  #lanyu-arena .arena-check input { accent-color: var(--arena-blue); vertical-align: middle; }
 #lanyu-arena .arena-cover-preview { width: min(100%, 540px); max-height: 210px; object-fit: cover; border-radius: var(--arena-radius); }
 #lanyu-arena .arena-trend { display: flex; align-items: end; gap: 10px; padding: 0 16px 15px; min-height: 130px; }
 #lanyu-arena .arena-trend-point { flex: 1 1 0; min-width: 0; display: grid; justify-items: center; gap: 5px; color: var(--arena-blue-ink); font-size: 12px; }

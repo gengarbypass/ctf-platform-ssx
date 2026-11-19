@@ -3,9 +3,16 @@
 {% block content %}
   {% call ui.heading("账号管理", "账号权限决定登录后的页面。") %}{{ ui.link("批量导入", url_for('manage.import_page'), "", "files") }}{{ ui.link("创建账号", url_for('manage.account_edit'), "primary", "plus") }}{% endcall %}
   {% call ui.panel("账号列表") %}
-    <div class="arena-table-wrap"><table class="arena-table"><caption>账号列表</caption>
-      <thead><tr><th scope="col">登录账号</th><th scope="col">显示名称</th><th scope="col">权限</th><th scope="col">队伍</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+    <form method="post" action="{{ url_for('manage.accounts_bulk_delete') }}" data-bulk-delete>
+      {{ ui.csrf() }}
+      <div class="arena-actions">
+        <button class="arena-btn danger-outline" type="submit" data-bulk-delete-button disabled>批量删除</button>
+        <small class="arena-muted">勾选账号后批量删除（当前登录账号不可删除）；删除后其提交仍计入原队伍成绩。</small>
+      </div>
+      <div class="arena-table-wrap"><table class="arena-table"><caption>账号列表</caption>
+      <thead><tr><th scope="col" class="arena-check"><input type="checkbox" data-select-all aria-label="全选"></th><th scope="col">登录账号</th><th scope="col">显示名称</th><th scope="col">权限</th><th scope="col">队伍</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
       <tbody>{% for row in rows %}<tr>
+        <td class="arena-check"><input type="checkbox" name="select" value="{{ row.id }}" aria-label="选择 {{ row.username }}"{% if row.id == g.user.id %} disabled title="当前登录账号不可删除"{% endif %}></td>
         <td class="arena-mono">{{ row.username }}</td><td><strong>{{ row.display_name }}</strong></td><td>{{ "赛事管理" if row.role == 'admin' else "参赛" }}</td>
         <td>{{ row.team_name or '—' }}</td><td>{{ ui.pill("启用" if row.enabled else "停用","success" if row.enabled else "neutral") }}</td>
         <td><div class="arena-actions">
@@ -19,5 +26,6 @@
         </div></td>
       </tr>{% endfor %}</tbody>
     </table></div>
+    </form>
   {% endcall %}
 {% endblock %}

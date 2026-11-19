@@ -123,6 +123,21 @@ if (probeBox) {
   });
 }
 
+const bulkDelete = document.querySelector("[data-bulk-delete]");
+if (bulkDelete) {
+  const boxes = [...bulkDelete.querySelectorAll('input[name="select"]')];
+  const button = bulkDelete.querySelector("[data-bulk-delete-button]");
+  const sync = () => {
+    button.disabled = !boxes.some(box => box.checked);
+  };
+  boxes.forEach(box => box.addEventListener("change", sync));
+  bulkDelete.querySelector("[data-select-all]")?.addEventListener("change", event => {
+    for (const box of boxes) if (!box.disabled) box.checked = event.target.checked;
+    sync();
+  });
+  sync();
+}
+
 const editor = document.querySelector("[data-brand-editor]");
 if (editor) {
   const preview = editor.querySelector("[data-brand-preview]");

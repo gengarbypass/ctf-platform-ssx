@@ -453,6 +453,36 @@ def import_teams():
     return saved(f"导入完成：新增队伍 {teams_created} 支、新增账号 {users_created} 个、分队 {assigned} 人。", "manage.import_page")
 
 
+@manage.route("/accounts/delete-bulk", methods=["POST"])
+@admin_required
+def accounts_bulk_delete():
+    """批量删除账号：第一阶段渲染确认页，第二阶段（stage=execute）执行删除。"""
+    ids = sorted({int(v) for v in request.form.getlist("select") if v.isdecimal() and 1 <= int(v) <= 2**63 - 1})
+    if not ids:
+        return saved("请先勾选要删除的账号。", "manage.accounts")
+    if g.user["id"] in ids:
+        raise FormError("批量删除不能包含当前登录账号。")
+    db = get_db()
+    placeholders = ",".join("?" * len(ids))
+    rows = db.execute(
+        f"SELECT id, username, display_name, role, enabled FROM users WHERE id IN ({placeholders})", ids,
+    ).fetchall()
+    if len(rows) != len(ids):
+        raise FormError("部分账号不存在，请刷新后重试。")
+    if request.form.get("stage") != "execute":
+        return render_template("manage/accounts_bulk.html", accounts=rows, ids=ids)
+    with transaction(db, write=True):
+        require_current_admin(db)
+        admin_selected = any(row["role"] == "admin" and row["enabled"] for row in rows)
+        remaining = db.execute(
+            f"SELECT COUNT(*) FROM users WHERE role = 'admin' AND enabled = 1 AND id NOT IN ({placeholders})", ids,
+        ).fetchone()[0]
+        if admin_selected and remaining == 0:
+            raise FormError("至少保留一个启用的赛事管理账号。")
+        db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", ids)
+    return saved(f"已删除 {len(ids)} 个账号。", "manage.accounts")
+
+
 @manage.route("/accounts/<int:user_id>/delete", methods=["GET", "POST"])
 @admin_required
 def account_delete(user_id):

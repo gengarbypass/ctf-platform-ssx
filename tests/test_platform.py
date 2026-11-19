@@ -496,6 +496,34 @@ class PlatformTest(unittest.TestCase):
         # 表单中存在检测按钮与状态区
         self.assertIn("检测连通性", self.admin.get("/manage/bank/new").get_data(as_text=True))
 
+    def test_bulk_delete_accounts(self):
+        contest_id = self.contest()
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        spare, spare_id = self.player(contest_id, "packetlab", "PacketLab")
+        puzzle_id = self.puzzle(contest_id)
+        self.post(player, f"/challenges/{puzzle_id}/flag", flag="flag{fixture}")
+        page = self.admin.get("/manage/accounts").get_data(as_text=True)
+        self.assertIn("批量删除", page)
+        self.assertIn("data-select-all", page)
+
+        ids = [row[0] for row in self.lookup("SELECT id FROM users WHERE username IN ('bluefox', 'packetlab')")]
+        admin_id = self.lookup("SELECT id FROM users WHERE username = 'arenaops'")[0][0]
+        # 空选与包含当前登录账号均被拒绝
+        self.post(self.admin, "/manage/accounts/delete-bulk", select=[], follow=True, code=200)
+        self.post(self.admin, "/manage/accounts/delete-bulk", code=400, select=[str(admin_id)])
+        # 确认页展示所选账号
+        confirm = self.post(self.admin, "/manage/accounts/delete-bulk",
+                            select=[str(v) for v in ids], code=200)
+        self.assertIn("批量删除账号", confirm.get_data(as_text=True))
+        self.assertIn("bluefox", confirm.get_data(as_text=True))
+        # 执行删除
+        self.post(self.admin, "/manage/accounts/delete-bulk", select=[str(v) for v in ids], stage="execute")
+        self.assertEqual(self.lookup("SELECT COUNT(*) FROM users WHERE username IN ('bluefox', 'packetlab')")[0][0], 0)
+        # 提交历史保留且归入原队伍（user_id 置空）
+        rows = self.lookup("SELECT verdict, user_id, team_id FROM flag_submissions")
+        self.assertEqual([(row["verdict"], row["user_id"], row["team_id"]) for row in rows], [("correct", None, team_id)])
+        self.assertIn("已删除账号", self.admin.get("/api/scoreboard/puzzle").json["content"])
+
     def test_import_users_and_teams(self):
         contest_id = self.contest("导入验证赛", active=False)
         users_csv = "账号,显示名,密码,角色\nfox01,狐狸一号,ImportPass-01,player\nfox02,狐狸二号,ImportPass-02,player\nchief,指挥官,ImportPass-03,admin\n"
