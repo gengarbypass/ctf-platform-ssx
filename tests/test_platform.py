@@ -373,7 +373,7 @@ class PlatformTest(unittest.TestCase):
         run = fake.state["runs"][0]
         self.assertEqual(run["image"], "iotmanage-dmz:1.0")
         self.assertEqual(run["ports"], {"80/tcp": 8400})
-        self.assertEqual(run["network"], "ctfenv-c%d-t%d-net" % (contest_id, team_id))
+        self.assertEqual(run["network"], "ctfenv-c%d-t%d-p0-net" % (contest_id, team_id))
         self.assertEqual(set(run["environment"]), {"FLAG_1", "FLAG_2"})
         page = player.get("/breach").get_data(as_text=True)
         self.assertIn(":8400</a>", page)
@@ -410,6 +410,64 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("重启环境", player.get("/breach").get_data(as_text=True))
         self.assertEqual(self.lookup("SELECT status FROM breach_environments WHERE team_id = ?", (team_id,))[0][0], "stopped")
         self.assertEqual(self.lookup("SELECT COUNT(*) FROM breach_environments WHERE status = 'running'")[0][0], 1)
+
+    def test_puzzle_dynamic_environments(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest("蓝域杯 · 动态解题赛", mode="puzzle")
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        other, other_team = self.player(contest_id, "packetlab", "PacketLab")
+        self.post(self.admin, "/manage/challenges/puzzle/new", contest_id=contest_id,
+                  title="容器入口", category="Web", difficulty="入门", points=100,
+                  description="读取容器内 FLAG", env_image="nginx:alpine", env_container_port="80", published="1")
+        puzzle_id = self.lookup("SELECT id FROM puzzles WHERE env_image IS NOT NULL")[0][0]
+        self.puzzle(contest_id)
+        static_id = self.lookup("SELECT id FROM puzzles WHERE contest_id = ? AND env_image IS NULL", (contest_id,))[0][0]
+        page = player.get(f"/challenges/{puzzle_id}").get_data(as_text=True)
+        self.assertIn("启动环境", page)
+        self.assertIn("动态环境", player.get("/challenges?category=Web").get_data(as_text=True))
+
+        self.post(player, f"/challenges/{puzzle_id}/env/start")
+        env = self.lookup("SELECT * FROM breach_environments WHERE puzzle_id = ?", (puzzle_id,))[0]
+        self.assertEqual((env["status"], env["host_port"]), ("running", 8400))
+        run = fake.state["runs"][0]
+        self.assertEqual(run["image"], "nginx:alpine")
+        self.assertEqual(run["ports"], {"80/tcp": 8400})
+        derived = env_flag_value(env["secret"], env["id"], puzzle_id)
+        self.assertEqual(run["environment"]["FLAG"], derived)
+        self.assertIn(":8400</a>", player.get(f"/challenges/{puzzle_id}").get_data(as_text=True))
+
+        result = self.post(player, f"/challenges/{puzzle_id}/flag", flag=derived, follow=True, code=200)
+        self.assertIn("Flag 正确", result.get_data(as_text=True))
+        # 其他队伍环境的派生 flag 无效（other 解题前先验证跨队派生无效）
+        self.post(other, f"/challenges/{puzzle_id}/env/start")
+        other_env = self.lookup("SELECT * FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (puzzle_id, other_team))[0]
+        self.assertEqual(other_env["host_port"], 8401)
+        wrong = self.post(other, f"/challenges/{puzzle_id}/flag",
+                          flag=derived, follow=True, code=200)
+        self.assertIn("Flag 错误", wrong.get_data(as_text=True))
+        # 静态赛题不受影响
+        self.post(player, f"/challenges/{static_id}/flag", flag="flag{fixture}", follow=True, code=200)
+        self.assertEqual([tuple(r) for r in self.lookup(
+            "SELECT verdict FROM flag_submissions WHERE puzzle_id = ? ORDER BY id", (puzzle_id,))],
+            [("correct",), ("incorrect",)])
+        # 停止后环境卡片回到待启动状态
+        self.post(player, f"/challenges/{puzzle_id}/env/stop")
+        self.assertEqual(self.lookup(
+            "SELECT status FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (puzzle_id, team_id))[0][0],
+            "stopped")
+        again = player.get(f"/challenges/{puzzle_id}").get_data(as_text=True)
+        self.assertIn("重启环境", again)
+        self.assertNotIn(":8400</a>", again)
+        # 编辑保留动态属性并更新镜像
+        self.post(self.admin, f"/manage/challenges/puzzle/{puzzle_id}/edit", contest_id=contest_id,
+                  title="容器入口", category="Web", difficulty="入门", points=120,
+                  description="同上", env_image="nginx:alpine", env_container_port="8080", published="1")
+        row = self.lookup("SELECT points, env_image, env_container_port, flag_digest FROM puzzles WHERE id = ?", (puzzle_id,))[0]
+        self.assertEqual((row["points"], row["env_image"], row["env_container_port"], row["flag_digest"]),
+                         (120, "nginx:alpine", 8080, ""))
+        # 比赛表单展示解题赛环境配置
+        self.assertIn("env_ttl_minutes", self.admin.get(f"/manage/contests/{contest_id}/edit").get_data(as_text=True))
 
     def test_scheduled_access_and_persistence(self):
         contest_id = self.contest(upcoming=True)
@@ -548,7 +606,7 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 5)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 6)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(len(self.lookup("SELECT id FROM round_tasks")), 2)

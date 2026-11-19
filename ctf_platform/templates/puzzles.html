@@ -15,7 +15,7 @@
       {% for card in cards %}
       <a class="arena-panel arena-task" href="{{ url_for('site.puzzle', puzzle_id=card.id) }}">
         <div class="arena-task-top"><span class="arena-icon-box">{{ ui.icon('flag') }}</span>{{ ui.pill("已解" if card.solved else "未解", "success" if card.solved else "neutral") }}</div>
-        <div><h2>{{ card.title }}</h2><p>{{ card.category }} · {{ card.difficulty }}{% if card.attached %} · 有附件{% endif %}</p></div>
+        <div><h2>{{ card.title }}</h2><p>{{ card.category }} · {{ card.difficulty }}{% if card.attached %} · 有附件{% endif %}{% if card.has_env %} · 动态环境{% endif %}</p></div>
         <div class="arena-task-bottom"><span><strong class="arena-number">{{ card.points }}</strong> <small>分</small></span><small>{{ card.solves }} 队解出</small></div>
       </a>
       {% endfor %}

@@ -5,6 +5,41 @@
   {% call ui.heading(puzzle.title, puzzle.category ~ ' · ' ~ puzzle.difficulty ~ ' · ' ~ puzzle.points ~ ' 分') %}
     {{ ui.pill("已解" if solved else "未解", "success" if solved else "neutral") }}
   {% endcall %}
+  {% if puzzle.env_image %}
+    {% call ui.panel("题目环境") %}
+      {% if not g.team %}
+        <div class="arena-detail-copy"><p>加入当前比赛的队伍后即可启动本题的专属环境。</p></div>
+      {% elif not environment or environment.status == 'stopped' %}
+        <div class="arena-detail-copy"><p>启动后将获得本题专属容器与端口，本题 Flag 由平台为本队生成后注入容器。</p></div>
+        <form class="arena-actions" action="{{ url_for('site.start_puzzle_environment', puzzle_id=puzzle.id) }}" method="post">
+          {{ ui.csrf() }}<button class="arena-btn primary" type="submit">{{ ui.icon('plus') }}{{ '重启环境' if environment else '启动环境' }}</button>
+        </form>
+      {% elif environment.status == 'starting' %}
+        <div class="arena-detail-copy"><p>环境启动中，稍候自动刷新…</p></div>
+        <meta http-equiv="refresh" content="4">
+      {% elif environment.status == 'error' %}
+        <div class="arena-detail-copy"><div class="arena-feedback error" role="status">环境启动失败：{{ environment.last_error or '未知错误' }}</div></div>
+        <form class="arena-actions" action="{{ url_for('site.start_puzzle_environment', puzzle_id=puzzle.id) }}" method="post">
+          {{ ui.csrf() }}<button class="arena-btn primary" type="submit">重试启动</button>
+        </form>
+      {% else %}
+        <div class="arena-detail-copy">
+          <dl class="arena-detail-data">
+            <div><dt>环境地址</dt><dd><a class="arena-mono" href="http://{{ environment_host }}:{{ environment.host_port }}" target="_blank" rel="noopener">http://{{ environment_host }}:{{ environment.host_port }}</a></dd></div>
+            {% if environment.expires_at %}
+            <div><dt>剩余时间</dt><dd><time class="arena-mono" data-clock-end="{{ environment.expires_at }}" data-server-now="{{ g.now }}">{{ countdown(environment.expires_at - g.now) }}</time></dd></div>
+            {% endif %}
+            <div><dt>状态</dt><dd>{{ ui.pill(env_statuses[environment.status], 'success') }}</dd></div>
+          </dl>
+          <p>本题 Flag 只对本队环境有效；重启环境后地址与 Flag 保持不变。</p>
+        </div>
+        <div class="arena-actions">
+          <form action="{{ url_for('site.start_puzzle_environment', puzzle_id=puzzle.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">重启环境</button></form>
+          <form action="{{ url_for('site.stop_puzzle_environment', puzzle_id=puzzle.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">停止环境</button></form>
+        </div>
+      {% endif %}
+    {% endcall %}
+  {% endif %}
   <div class="arena-two arena-split">
     {% call ui.panel("题目详情") %}
       <div class="arena-detail-copy">

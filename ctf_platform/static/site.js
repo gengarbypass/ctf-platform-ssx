@@ -55,7 +55,9 @@ const envConfig = contestForm?.querySelector("[data-env-config]");
 if (roundDuration || envConfig) {
   const mode = contestForm.elements.namedItem("mode");
   const minutes = contestForm.elements.namedItem("round_minutes");
-  const envFields = envConfig ? [...envConfig.querySelectorAll("input")] : [];
+  const breachOnly = envConfig ? [...envConfig.querySelectorAll("[data-env-breach-only] input")] : [];
+  const sharedFields = envConfig ? [...envConfig.querySelectorAll("input")] : [];
+  const shared = sharedFields.filter(field => !breachOnly.includes(field));
   function updateModeSections() {
     if (roundDuration) {
       const isRound = mode.value === "round";
@@ -65,11 +67,15 @@ if (roundDuration || envConfig) {
     }
     if (envConfig) {
       const isBreach = mode.value === "breach";
-      envConfig.hidden = !isBreach;
-      for (const field of envFields) {
-        if (field.name === "env_image") continue;
+      const isDynamic = isBreach || mode.value === "puzzle";
+      envConfig.hidden = !isDynamic;
+      for (const field of breachOnly) {
         field.disabled = !isBreach;
         field.required = isBreach && field.name !== "env_image";
+      }
+      for (const field of shared) {
+        field.disabled = !isDynamic;
+        field.required = isBreach;
       }
     }
   }

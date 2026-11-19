@@ -10,8 +10,18 @@ from .domain import (
     choice_field, contest_state, integer_field, new_flag, parse_local_time, text_field, username_value, validate_password,
 )
 from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix
+from .range import RangeError, stop_environment
 from .storage import read_upload, save_upload
 from .views import PAGE_SIZE, page_number, records_kind
+
+
+def purge_environments(env_rows):
+    """尽力停止并移除一批环境容器（删除队伍/比赛后防止孤儿容器）。"""
+    for row in env_rows:
+        try:
+            stop_environment(row["contest_id"], row["team_id"], row["puzzle_id"], container_id=row["container_id"])
+        except RangeError:
+            pass
 
 
 manage = Blueprint("manage", __name__, url_prefix="/manage")
@@ -102,13 +112,17 @@ def contest_edit(contest_id):
     end_at = parse_local_time("end_at", "结束时间")
     round_seconds = integer_field("round_minutes", "回合分钟数", 1, 1440) * 60 if mode == "round" else None
     env_image = env_container_port = env_ttl_minutes = env_max = None
-    if mode == "breach":
-        env_image = request.form.get("env_image", "").strip()
-        if env_image:
-            if len(env_image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", env_image):
-                raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
-            env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
+    if mode in ("breach", "puzzle"):
+        if mode == "breach":
+            env_image = request.form.get("env_image", "").strip() or None
+            if env_image:
+                if len(env_image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", env_image):
+                    raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
+                env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
+        # 环境时长与并发上限留空时，环境启动按默认值（120 分钟 / 20 个）执行
+        if request.form.get("env_ttl_minutes", "").strip():
             env_ttl_minutes = integer_field("env_ttl_minutes", "环境时长", 5, 1440)
+        if request.form.get("env_max", "").strip():
             env_max = integer_field("env_max", "环境上限", 1, 500)
     if end_at <= start_at:
         raise FormError("结束时间须晚于开赛时间。")
@@ -190,8 +204,10 @@ def contest_delete(contest_id):
                                impact=impact, back=url_for("manage.contests"))
     with transaction(db, write=True):
         require_current_admin(db)
+        env_rows = db.execute("SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE contest_id = ?", (contest_id,)).fetchall()
         if not db.execute("DELETE FROM contests WHERE id = ?", (contest_id,)).rowcount:
             abort(404)
+    purge_environments(env_rows)
     if session.get("manage_contest_id") == contest_id:
         session.pop("manage_contest_id")
     return saved("比赛已删除。", "manage.contests")
@@ -362,8 +378,10 @@ def team_delete(team_id):
         )
     with transaction(db, write=True):
         require_current_admin(db)
+        env_rows = db.execute("SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE team_id = ?", (team_id,)).fetchall()
         if not db.execute("DELETE FROM teams WHERE id = ? AND contest_id = ?", (team_id, contest_id)).rowcount:
             abort(404)
+    purge_environments(env_rows)
     return saved("队伍已删除。", "manage.teams")
 
 
@@ -478,8 +496,18 @@ def challenge_edit(kind, task_id):
         category = choice_field("category", "分类", CATEGORIES)
         difficulty = choice_field("difficulty", "难度", DIFFICULTIES)
         points = integer_field("points", "分值", 1, 100_000)
-        flag = text_field("flag", "Flag", 256, optional=task is not None)
-        salt_and_digest = new_flag(flag) if flag else None
+        env_image = request.form.get("env_image", "").strip() or None
+        env_container_port = None
+        if env_image:
+            if len(env_image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", env_image):
+                raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
+            env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
+        flag = text_field("flag", "Flag", 256, optional=True)
+        if not task and not flag and not env_image:
+            raise FormError("请填写 Flag；或在填写环境镜像后留空以按队伍动态生成。")
+        if not env_image and task and not flag and not task["flag_digest"]:
+            raise FormError("该赛题当前为动态环境赛题，请保留环境镜像或改填固定 Flag。")
+        salt_and_digest = new_flag(flag) if flag else (("", "") if (env_image and not task) else None)
         uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
         remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
         with transaction(db, write=True):
@@ -488,14 +516,18 @@ def challenge_edit(kind, task_id):
                 if salt_and_digest:
                     db.execute("UPDATE puzzles SET flag_salt = ?, flag_digest = ? WHERE id = ?", (*salt_and_digest, task_id))
                 db.execute(
-                    """UPDATE puzzles SET title = ?, category = ?, difficulty = ?, description = ?, points = ?, published = ?
-                       WHERE id = ? AND contest_id = ?""", (title, category, difficulty, description, points, published, task_id, contest_id),
+                    """UPDATE puzzles SET title = ?, category = ?, difficulty = ?, description = ?, points = ?, published = ?,
+                       env_image = ?, env_container_port = ?
+                       WHERE id = ? AND contest_id = ?""",
+                    (title, category, difficulty, description, points, published, env_image, env_container_port, task_id, contest_id),
                 )
             else:
                 task_id = db.execute(
-                    """INSERT INTO puzzles (contest_id, title, category, difficulty, description, points, flag_salt, flag_digest, published)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (contest_id, title, category, difficulty, description, points, *salt_and_digest, published),
+                    """INSERT INTO puzzles (contest_id, title, category, difficulty, description, points, flag_salt, flag_digest,
+                                           published, env_image, env_container_port)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (contest_id, title, category, difficulty, description, points, *salt_and_digest, published,
+                     env_image, env_container_port),
                 ).lastrowid
             for file_id in remove_ids:
                 db.execute("DELETE FROM puzzle_files WHERE puzzle_id = ? AND file_id = ?", (task_id, file_id))

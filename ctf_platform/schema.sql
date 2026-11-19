@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS puzzles (
     flag_salt TEXT NOT NULL,
     flag_digest TEXT NOT NULL,
     published INTEGER NOT NULL DEFAULT 0 CHECK (published IN (0, 1)),
+    env_image TEXT,
+    env_container_port INTEGER CHECK (env_container_port IS NULL OR env_container_port BETWEEN 1 AND 65535),
     UNIQUE (contest_id, id)
 );
 CREATE INDEX IF NOT EXISTS puzzle_listing ON puzzles(contest_id, published, category);
@@ -148,6 +150,7 @@ CREATE TABLE IF NOT EXISTS breach_environments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contest_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
+    puzzle_id INTEGER NOT NULL DEFAULT 0 CHECK (puzzle_id >= 0),
     container_id TEXT NOT NULL DEFAULT '',
     network_id TEXT NOT NULL DEFAULT '',
     host_port INTEGER,
@@ -159,7 +162,7 @@ CREATE TABLE IF NOT EXISTS breach_environments (
     stopped_at INTEGER,
     expires_at INTEGER,
     FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE,
-    UNIQUE (contest_id, team_id)
+    UNIQUE (contest_id, team_id, puzzle_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_env_port ON breach_environments(host_port) WHERE host_port IS NOT NULL;
 

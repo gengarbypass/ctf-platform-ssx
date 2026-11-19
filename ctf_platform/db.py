@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
     "breach_flags", "breach_submissions", "breach_environments", "round_tasks", "service_states",
@@ -93,6 +93,21 @@ def rebuild_tables(connection, schema):
         connection.execute(statement)
 
 
+def table_columns(connection, table):
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone() is None:
+        return None
+    return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def add_column(connection, table, column_def):
+    """补齐缺失列；列已存在（如由旧应用版本写入）时跳过。"""
+    if table_columns(connection, table) is None:
+        return
+    name = column_def.split()[0]
+    if name not in table_columns(connection, table):
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+
+
 def prepare_schema(connection):
     if connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
         return
@@ -105,7 +120,7 @@ def prepare_schema(connection):
             if version == SCHEMA_VERSION:
                 return
             if version == 1:
-                connection.execute("ALTER TABLE contests ADD COLUMN mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round'))")
+                add_column(connection, "contests", "mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round'))")
                 connection.execute(
                     """UPDATE contests SET mode = 'round'
                        WHERE NOT EXISTS (SELECT 1 FROM puzzles WHERE contest_id = contests.id)
@@ -114,7 +129,12 @@ def prepare_schema(connection):
                 )
             if 1 <= version <= 4:
                 for column in ("env_image TEXT", "env_container_port INTEGER", "env_ttl_minutes INTEGER", "env_max INTEGER"):
-                    connection.execute(f"ALTER TABLE contests ADD COLUMN {column}")
+                    add_column(connection, "contests", column)
+            if 1 <= version <= 5:
+                add_column(connection, "puzzles", "env_image TEXT")
+                add_column(connection, "puzzles", "env_container_port INTEGER")
+            if version == 5:
+                add_column(connection, "breach_environments", "puzzle_id INTEGER NOT NULL DEFAULT 0")
             schema = tuple(schema_statements())
             if version:
                 rebuild_tables(connection, schema)

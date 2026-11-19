@@ -31,7 +31,11 @@
         </div>
         <div class="arena-two">
           {{ ui.field("分值","points",task.points if task else 100,type='number',min=1,maximum=100000) }}
-          {{ ui.field("Flag","flag",type='password',max=256,required=not task,placeholder="留空保留当前 Flag" if task else "输入正确答案") }}
+          {{ ui.field("Flag","flag",type='password',max=256,required=false,placeholder=("留空则按队伍动态生成" if task and task.env_image else "输入正确答案；填写环境镜像后可留空")) }}
+        </div>
+        <div class="arena-two">
+          {{ ui.field("环境镜像","env_image",task.env_image if task else '',max=200,required=false,placeholder="选填；填写后每支队伍可启动本题专属容器并按队生成 Flag") }}
+          {{ ui.field("容器端口","env_container_port",task.env_container_port if task and task.env_container_port else 80,type='number',min=1,maximum=65535,required=false) }}
         </div>
       {% elif kind == 'breach' and task %}
         {{ ui.field("所属层级","layer",task.layer,max=40,placeholder="如 边界突破 / 内网横向 / 设备接管") }}

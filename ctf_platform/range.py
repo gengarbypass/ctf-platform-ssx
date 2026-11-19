@@ -22,15 +22,15 @@ def docker_client():
     return docker.DockerClient(base_url=base_url)
 
 
-def resource_name(contest_id, team_id, *, network=False):
-    name = f"ctfenv-c{contest_id}-t{team_id}"
+def resource_name(contest_id, team_id, puzzle_id=0, *, network=False):
+    name = f"ctfenv-c{contest_id}-t{team_id}-p{puzzle_id}"
     return f"{name}-net" if network else name
 
 
-def stop_environment(contest_id, team_id, *, container_id=""):
+def stop_environment(contest_id, team_id, puzzle_id=0, *, container_id=""):
     """按容器 ID 与命名兜底停止并移除容器和专属网络，找不到视为已清理。"""
     client = docker_client()
-    name = resource_name(contest_id, team_id)
+    name = resource_name(contest_id, team_id, puzzle_id)
     for identifier in (container_id, name):
         if not identifier:
             continue
@@ -41,32 +41,33 @@ def stop_environment(contest_id, team_id, *, container_id=""):
         except Exception:
             pass
     try:
-        network = client.networks.get(resource_name(contest_id, team_id, network=True))
+        network = client.networks.get(resource_name(contest_id, team_id, puzzle_id, network=True))
         network.remove()
     except Exception:
         pass
 
 
-def start_environment(*, contest, team, host_port, flag_env):
+def start_environment(*, contest, team, image, container_port, host_port, flag_env, puzzle_id=0):
     """为队伍创建专属网络与容器并启动，返回 (container_id, network_id)。
 
-    flag_env 为注入容器的环境变量（各靶点派生的 Flag）。
+    flag_env 为注入容器的环境变量（按队派生的 Flag）；image 解题赛取赛题配置、
+    综合渗透取比赛配置。
     """
     client = docker_client()
-    name = resource_name(contest["id"], team["id"])
-    network_name = resource_name(contest["id"], team["id"], network=True)
-    stop_environment(contest["id"], team["id"])
+    name = resource_name(contest["id"], team["id"], puzzle_id)
+    network_name = resource_name(contest["id"], team["id"], puzzle_id, network=True)
+    stop_environment(contest["id"], team["id"], puzzle_id)
     try:
         network = client.networks.create(network_name, driver="bridge", labels={"ctf.env": name})
         try:
             container = client.containers.run(
-                contest["env_image"],
+                image,
                 name=name,
                 detach=True,
                 network=network_name,
                 labels={"ctf.env": name},
                 environment=dict(flag_env),
-                ports={f"{contest['env_container_port']}/tcp": host_port},
+                ports={f"{container_port}/tcp": host_port},
                 mem_limit=current_app.config["ENV_MEM_LIMIT"],
                 nano_cpus=int(current_app.config["ENV_CPU_QUOTA"]) * 10000,
                 pids_limit=current_app.config["ENV_PIDS_LIMIT"],
