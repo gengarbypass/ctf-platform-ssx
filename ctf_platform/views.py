@@ -104,7 +104,8 @@ def puzzle_home():
         contest_id = g.contest["id"]
         if g.match["status"] != "upcoming":
             metrics["puzzles"] = db.execute(
-                "SELECT COUNT(*) FROM puzzles WHERE contest_id = ? AND published = 1", (contest_id,),
+                """SELECT COUNT(*) FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
+                   WHERE cp.contest_id = ? AND p.published = 1""", (contest_id,),
             ).fetchone()[0]
         if g.team:
             metrics["puzzle"] = next((row for row in puzzle_rankings(db, contest_id) if row["id"] == g.team["id"]), None)
@@ -126,10 +127,12 @@ def puzzles():
                       COUNT(f.id) AS solves, MAX(CASE WHEN f.team_id = ? THEN 1 ELSE 0 END) AS solved,
                       EXISTS(SELECT 1 FROM puzzle_files a WHERE a.puzzle_id = p.id) AS attached,
                       (p.env_image IS NOT NULL) AS has_env
-               FROM puzzles p LEFT JOIN flag_submissions f ON f.puzzle_id = p.id AND f.verdict = 'correct'
-               WHERE p.contest_id = ? AND p.published = 1 AND (? = '' OR p.category = ?)
+               FROM contest_puzzles cp
+               JOIN puzzles p ON p.id = cp.puzzle_id
+               LEFT JOIN flag_submissions f ON f.puzzle_id = p.id AND f.verdict = 'correct' AND f.contest_id = ?
+               WHERE cp.contest_id = ? AND p.published = 1 AND (? = '' OR p.category = ?)
                GROUP BY p.id ORDER BY p.category, p.points, p.id""",
-            (g.team["id"] if g.team else None, g.contest["id"], category, category),
+            (g.team["id"] if g.team else None, g.contest["id"], g.contest["id"], category, category),
         ).fetchall()
     return render_template("puzzles.html", title="赛题", cards=cards, categories=CATEGORIES, category=category)
 
@@ -137,11 +140,18 @@ def puzzles():
 def readable_task(mode, task_id):
     if not g.contest or g.contest["mode"] != mode or g.match["status"] == "upcoming":
         abort(404)
-    table = CHALLENGE_TABLES[mode]
-    task = get_db().execute(
-        f"SELECT * FROM {table} WHERE id = ? AND contest_id = ? AND published = 1",
-        (task_id, g.contest["id"]),
-    ).fetchone()
+    db = get_db()
+    if mode == "puzzle":
+        task = db.execute(
+            """SELECT p.* FROM puzzles p JOIN contest_puzzles cp ON cp.puzzle_id = p.id
+               WHERE p.id = ? AND cp.contest_id = ? AND p.published = 1""",
+            (task_id, g.contest["id"]),
+        ).fetchone()
+    else:
+        task = db.execute(
+            "SELECT * FROM round_tasks WHERE id = ? AND contest_id = ? AND published = 1",
+            (task_id, g.contest["id"]),
+        ).fetchone()
     if task is None:
         abort(404)
     return task
@@ -198,10 +208,17 @@ def live_context(db, mode):
 def submission_context(db, mode, task_id):
     contest, team, now = live_context(db, mode)
     table = CHALLENGE_TABLES[mode]
-    task = db.execute(
-        f"SELECT * FROM {table} WHERE id = ? AND contest_id = ? AND published = 1",
-        (task_id, contest["id"]),
-    ).fetchone()
+    if mode == "puzzle":
+        task = db.execute(
+            """SELECT p.* FROM puzzles p JOIN contest_puzzles cp ON cp.puzzle_id = p.id
+               WHERE p.id = ? AND cp.contest_id = ? AND p.published = 1""",
+            (task_id, contest["id"]),
+        ).fetchone()
+    else:
+        task = db.execute(
+            "SELECT * FROM round_tasks WHERE id = ? AND contest_id = ? AND published = 1",
+            (task_id, contest["id"]),
+        ).fetchone()
     if task is None:
         abort(404)
     return contest, team, task, now
@@ -626,14 +643,16 @@ def download(file_id):
     patch_team = g.team["id"] if g.team and g.contest["mode"] == "round" else None
     row = db.execute(
         """SELECT f.* FROM uploads f WHERE f.id = ? AND (
-             (f.kind = 'attachment' AND EXISTS (
-               SELECT 1 FROM puzzle_files a JOIN puzzles p ON p.id = a.puzzle_id
-               WHERE a.file_id = f.id AND (? = 1 OR (p.contest_id = ? AND p.published = 1 AND ? = 1))
-             )) OR (f.kind = 'patch' AND EXISTS (
+             (f.kind = 'attachment' AND (? = 1 OR (? = 1 AND EXISTS (
+               SELECT 1 FROM puzzle_files a
+               JOIN contest_puzzles cp ON cp.puzzle_id = a.puzzle_id
+               JOIN puzzles p ON p.id = cp.puzzle_id
+               WHERE a.file_id = f.id AND cp.contest_id = ? AND p.published = 1
+             )))) OR (f.kind = 'patch' AND EXISTS (
                SELECT 1 FROM patches p WHERE p.file_id = f.id AND (? = 1 OR (p.contest_id = ? AND p.team_id = ?))
              ))
            )""",
-        (file_id, admin, contest_id, puzzle_open, admin, contest_id, patch_team),
+        (file_id, admin, puzzle_open, contest_id, admin, contest_id, patch_team),
     ).fetchone()
     if not row:
         abort(404)

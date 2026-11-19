@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  {% call ui.heading("题库", "赛题独立于比赛维护，可复用于任意解题赛；填写环境镜像的赛题支持动态容器。") %}
+    {{ ui.link("创建赛题", url_for('manage.bank_edit'), "primary", "plus") }}
+  {% endcall %}
+  {% call ui.panel("全部赛题") %}
+    {% if rows %}
+    <div class="arena-table-wrap"><table class="arena-table"><caption>赛题列表</caption>
+      <thead><tr><th scope="col">题目</th><th scope="col">分类</th><th scope="col">分值</th><th scope="col">环境</th><th scope="col">所属比赛</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+      <tbody>{% for row in rows %}<tr>
+        <td><strong>{{ row.title }}</strong></td>
+        <td>{{ row.category }}</td>
+        <td>{{ row.points }}</td>
+        <td>{{ ui.pill("动态容器", "success") if row.has_env else ui.pill("静态 Flag", "neutral") }}</td>
+        <td>{{ row.contests or '—' }}</td>
+        <td>{{ ui.pill("已开放" if row.published else "草稿", "success" if row.published else "neutral") }}</td>
+        <td><div class="arena-actions">
+          {{ ui.link("编辑", url_for('manage.bank_edit', task_id=row.id), "link") }}
+          {{ ui.link("删除", url_for('manage.bank_delete', task_id=row.id), "danger-outline") }}
+        </div></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}{{ ui.empty("题库为空，点击「创建赛题」开始出题。") }}{% endif %}
+  {% endcall %}
+{% endblock %}

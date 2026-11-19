@@ -2,6 +2,7 @@
 {% import "macros.html" as ui with context %}
 {% block content %}
   {% call ui.heading(title, g.managed.title if g.managed else "创建比赛后即可管理队伍。") %}
+    {{ ui.link("批量导入", url_for('manage.import_page'), "", "files") }}
     {% if g.managed %}{{ ui.link("创建队伍", url_for('manage.team_edit'), "primary", "plus") }}{% else %}{{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}{% endif %}
   {% endcall %}
   {% if g.managed %}

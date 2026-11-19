@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回赛事总览", url_for('manage.overview'), "link", "back") }}</div>
+  {{ ui.heading("批量导入", "下载模板填写后上传，CSV 须为 UTF-8 编码；导入失败时全部回滚。") }}
+  {% call ui.panel("导入账号") %}
+    <form class="arena-form" method="post" enctype="multipart/form-data" action="{{ url_for('manage.import_users') }}">
+      {{ ui.csrf() }}
+      <p class="arena-muted">列：账号、显示名、密码、角色（player/admin，留空为 player）。密码须 12–128 个字符；账号重复将整体回滚。</p>
+      <label class="arena-field">CSV 文件<input class="arena-input" type="file" name="file" accept=".csv" required></label>
+      <div class="arena-actions">
+        <button class="arena-btn primary" type="submit">导入账号</button>
+        {{ ui.link("下载用户模板", url_for('manage.users_template'), "link", "down") }}
+      </div>
+    </form>
+  {% endcall %}
+  {% call ui.panel("导入队伍并分队") %}
+    <form class="arena-form" method="post" enctype="multipart/form-data" action="{{ url_for('manage.import_teams') }}">
+      {{ ui.csrf(true) }}
+      {% if has_contest %}
+        <p class="arena-muted">导入到当前编辑比赛：<strong>{{ g.managed.title }}</strong>。列：队伍、账号、显示名、密码。同一队伍名自动合并为一队；账号不存在则创建（player）；账号已存在则沿用并分队；一行只填队伍名即创建空队。</p>
+        <label class="arena-field">CSV 文件<input class="arena-input" type="file" name="file" accept=".csv" required></label>
+        <div class="arena-actions">
+          <button class="arena-btn primary" type="submit">导入队伍</button>
+          {{ ui.link("下载队伍模板", url_for('manage.teams_template'), "link", "down") }}
+        </div>
+      {% else %}
+        <p class="arena-muted">请先在「比赛配置」创建比赛并选择为当前编辑比赛，再导入队伍。</p>
+      {% endif %}
+    </form>
+  {% endcall %}
+{% endblock %}

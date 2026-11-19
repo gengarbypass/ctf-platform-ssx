@@ -10,11 +10,11 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
-    "breach_flags", "breach_submissions", "breach_environments", "round_tasks", "service_states",
-    "patches", "score_events",
+    "contest_puzzles", "breach_flags", "breach_submissions", "breach_environments",
+    "round_tasks", "service_states", "patches", "score_events",
 )
 
 
@@ -119,11 +119,23 @@ def prepare_schema(connection):
                 raise RuntimeError("数据库版本高于当前应用版本。")
             if version == SCHEMA_VERSION:
                 return
+            if 1 <= version <= 6:
+                # 赛题题库化：先把既有赛题与比赛的归属搬入关联表（重建后 puzzles 不再带 contest_id）
+                cols = table_columns(connection, "puzzles")
+                if cols and "contest_id" in cols:
+                    connection.execute("""CREATE TABLE IF NOT EXISTS contest_puzzles (
+                        contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+                        puzzle_id INTEGER NOT NULL,
+                        added_at INTEGER NOT NULL,
+                        UNIQUE (contest_id, puzzle_id))""")
+                    connection.execute(
+                        """INSERT OR IGNORE INTO contest_puzzles (contest_id, puzzle_id, added_at)
+                           SELECT contest_id, id, strftime('%s', 'now') FROM puzzles WHERE contest_id IS NOT NULL""")
             if version == 1:
                 add_column(connection, "contests", "mode TEXT NOT NULL DEFAULT 'puzzle' CHECK (mode IN ('puzzle', 'round'))")
                 connection.execute(
                     """UPDATE contests SET mode = 'round'
-                       WHERE NOT EXISTS (SELECT 1 FROM puzzles WHERE contest_id = contests.id)
+                       WHERE NOT EXISTS (SELECT 1 FROM contest_puzzles cp WHERE cp.contest_id = contests.id)
                          AND (EXISTS (SELECT 1 FROM round_tasks WHERE contest_id = contests.id)
                               OR EXISTS (SELECT 1 FROM score_events WHERE contest_id = contests.id))"""
                 )

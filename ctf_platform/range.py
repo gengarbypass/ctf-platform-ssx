@@ -98,3 +98,74 @@ def environment_alive(contest_id, team_id, *, container_id=""):
         except Exception:
             continue
     return False
+
+
+def probe_image(image, container_port, *, timeout=12):
+    """创建一次性容器验证镜像可用、配置端口可连通。返回 (True, "") 或 (False, 原因)。"""
+    import secrets as _secrets
+    import socket
+    import time as _time
+
+    client = docker_client()
+    try:
+        client.images.get(image)
+    except Exception:
+        try:
+            client.images.pull(image)
+        except Exception as error:
+            return False, f"镜像不存在且拉取失败：{error}"
+    name = f"ctf-probe-{_secrets.token_hex(4)}"
+    envs = {"FLAG": "flag{probe-selftest}", "FLAG_1": "flag{probe-selftest}"}
+    limits = dict(
+        mem_limit=current_app.config["ENV_MEM_LIMIT"],
+        nano_cpus=int(current_app.config["ENV_CPU_QUOTA"]) * 10000,
+        pids_limit=current_app.config["ENV_PIDS_LIMIT"],
+    )
+    container = None
+    try:
+        platform = None
+        try:
+            platform = next(iter(client.containers.list(filters={"label": "com.docker.compose.service=platform"})), None)
+        except Exception:
+            platform = None
+        if platform is not None:
+            net_name = next(iter(platform.attrs.get("NetworkSettings", {}).get("Networks", {})), None)
+            if not net_name:
+                return False, "未能识别平台容器所在网络，无法探测"
+            container = client.containers.run(image, name=name, detach=True, network=net_name, environment=envs, **limits)
+            _time.sleep(2.5)
+            container.reload()
+            ip = container.attrs.get("NetworkSettings", {}).get("Networks", {}).get(net_name, {}).get("IPAddress")
+            if not ip:
+                return False, "探针容器未获得网络地址，镜像可能立即退出"
+            target = (ip, container_port)
+        else:
+            container = client.containers.run(image, name=name, detach=True,
+                                              ports={f"{container_port}/tcp": None}, environment=envs, **limits)
+            _time.sleep(2.5)
+            container.reload()
+            mapping = container.attrs.get("NetworkSettings", {}).get("Ports", {}).get(f"{container_port}/tcp") or []
+            host_port = next((item.get("HostPort") for item in mapping if item.get("HostPort")), None)
+            if not host_port:
+                return False, "探针容器未分配宿主端口，镜像可能立即退出"
+            target = ("127.0.0.1", int(host_port))
+        deadline = _time.time() + timeout
+        last_error = ""
+        while _time.time() < deadline:
+            try:
+                with socket.create_connection(target, timeout=2.5):
+                    return True, ""
+            except OSError as error:
+                last_error = str(error)
+            _time.sleep(1)
+        return False, f"容器端口 {container_port} 连接失败（{last_error or '超时'}）；请确认服务监听 0.0.0.0 且端口一致"
+    except RangeError:
+        raise
+    except Exception as error:
+        return False, str(error)
+    finally:
+        if container is not None:
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass

@@ -30,10 +30,13 @@
         {% if admin %}
           {% set managed_mode = g.managed.mode if g.managed else 'puzzle' %}
           {% set teams_label = '队伍与服务' if managed_mode == 'round' else '队伍管理' %}
-          {% for label, endpoint, path, glyph in [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题目管理','manage.challenges','/manage/challenges','list'),(teams_label,'manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
-            {% set destination = url_for(endpoint, kind=managed_mode) if endpoint == 'manage.challenges' else url_for(endpoint) %}
+          {% for label, endpoint, path, glyph in [('赛事总览','manage.overview','/manage/','home'),('比赛配置','manage.contests','/manage/contests','calendar'),('题库','manage.bank','/manage/bank','list'),('批量导入','manage.import_page','/manage/import','files'),(teams_label,'manage.teams','/manage/teams','teams'),('账号管理','manage.accounts','/manage/accounts','teams'),('提交管理','manage.submissions','/manage/submissions','files'),('品牌与外观','manage.brand','/manage/brand','brand')] %}
             {% set active = request.path == path if path in ['/', '/manage/'] else request.path.startswith(path) or (endpoint == 'manage.submissions' and request.path.startswith('/manage/patches')) %}
-            <a href="{{ destination }}"{% if active %} aria-current="page"{% endif %}>{{ ui.icon(glyph) }}{{ label }}</a>
+            <a href="{{ url_for(endpoint) }}"{% if active %} aria-current="page"{% endif %}>{{ ui.icon(glyph) }}{{ label }}</a>
+            {% if endpoint == 'manage.contests' and g.managed and managed_mode != 'puzzle' %}
+              {% set challenges_path = '/manage/challenges/' ~ managed_mode %}
+              <a href="{{ url_for('manage.challenges', kind=managed_mode) }}"{% if request.path.startswith(challenges_path) or request.path.startswith('/manage/patches') %} aria-current="page"{% endif %}>{{ ui.icon('list') }}题目管理</a>
+            {% endif %}
           {% endfor %}
         {% else %}
           {% set entered = g.contest and request.endpoint != 'site.home' %}

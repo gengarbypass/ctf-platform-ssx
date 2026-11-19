@@ -77,7 +77,6 @@ CREATE TABLE IF NOT EXISTS memberships (
 
 CREATE TABLE IF NOT EXISTS puzzles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     category TEXT NOT NULL,
     difficulty TEXT NOT NULL,
@@ -87,10 +86,16 @@ CREATE TABLE IF NOT EXISTS puzzles (
     flag_digest TEXT NOT NULL,
     published INTEGER NOT NULL DEFAULT 0 CHECK (published IN (0, 1)),
     env_image TEXT,
-    env_container_port INTEGER CHECK (env_container_port IS NULL OR env_container_port BETWEEN 1 AND 65535),
-    UNIQUE (contest_id, id)
+    env_container_port INTEGER CHECK (env_container_port IS NULL OR env_container_port BETWEEN 1 AND 65535)
 );
-CREATE INDEX IF NOT EXISTS puzzle_listing ON puzzles(contest_id, published, category);
+CREATE INDEX IF NOT EXISTS puzzle_listing ON puzzles(published, category);
+
+CREATE TABLE IF NOT EXISTS contest_puzzles (
+    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+    puzzle_id INTEGER NOT NULL,
+    added_at INTEGER NOT NULL,
+    UNIQUE (contest_id, puzzle_id)
+);
 
 CREATE TABLE IF NOT EXISTS puzzle_files (
     puzzle_id INTEGER NOT NULL REFERENCES puzzles(id) ON DELETE CASCADE,
@@ -107,7 +112,7 @@ CREATE TABLE IF NOT EXISTS flag_submissions (
     verdict TEXT NOT NULL CHECK (verdict IN ('correct', 'incorrect', 'already_solved')),
     points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
     submitted_at INTEGER NOT NULL,
-    FOREIGN KEY (contest_id, puzzle_id) REFERENCES puzzles(contest_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (puzzle_id) REFERENCES puzzles(id) ON DELETE CASCADE,
     FOREIGN KEY (contest_id, team_id) REFERENCES teams(contest_id, id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_flag_award ON flag_submissions(puzzle_id, team_id) WHERE verdict = 'correct';

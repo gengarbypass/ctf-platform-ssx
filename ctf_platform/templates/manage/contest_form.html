@@ -35,19 +35,18 @@
           {{ ui.field("每回合分钟数","round_minutes",minutes,type='number',min=1,maximum=1440,required=mode=='round',disabled=mode!='round') }}
         </div>
       {% endif %}
-      {% if not contest or not contest.active or mode != 'round' %}
-        {% set dynamic = contest and contest.env_image %}
-        <div data-env-config{% if mode != 'breach' and mode != 'puzzle' %} hidden{% endif %}>
-          <p class="arena-muted">动态环境：综合渗透按比赛统一镜像为每队启动整场靶场容器；解题赛在每道赛题上单独配置镜像，队伍在题目页启动本题专属容器。各队 Flag 由平台动态生成注入容器，环境按时长自动回收并受并发上限约束。</p>
-          <div class="arena-two" data-env-breach-only>
-            {{ ui.field("环境镜像","env_image",contest.env_image if dynamic else '',max=200,required=false,placeholder="如 iotmanage-dmz:1.0",disabled=mode!='breach') }}
-            {{ ui.field("容器端口","env_container_port",contest.env_container_port if dynamic else 80,type='number',min=1,maximum=65535,required=mode=='breach',disabled=mode!='breach') }}
+      {% if contest and mode == 'breach' %}
+        {% call ui.panel("动态靶场环境") %}
+          <p class="arena-muted">填写镜像后，每支队伍可在靶场页启动整场独立的靶场容器（自动分配端口）；靶点创建时 Flag 可留空，由平台按队伍生成注入。</p>
+          <div class="arena-two">
+            {{ ui.field("环境镜像","env_image",contest.env_image if contest.env_image else '',max=200,required=false,placeholder="如 iotmanage-dmz:1.0") }}
+            {{ ui.field("容器端口","env_container_port",contest.env_container_port if contest.env_container_port else 80,type='number',min=1,maximum=65535,required=false) }}
           </div>
           <div class="arena-two">
-            {{ ui.field("环境时长（分钟）","env_ttl_minutes",contest.env_ttl_minutes if contest and contest.env_ttl_minutes else 120,type='number',min=5,maximum=1440,required=false,disabled=mode not in ('breach','puzzle')) }}
-            {{ ui.field("环境并发上限","env_max",contest.env_max if contest and contest.env_max else 20,type='number',min=1,maximum=500,required=false,disabled=mode not in ('breach','puzzle')) }}
+            {{ ui.field("环境时长（分钟）","env_ttl_minutes",contest.env_ttl_minutes if contest.env_ttl_minutes else 120,type='number',min=5,maximum=1440,required=false) }}
+            {{ ui.field("环境并发上限","env_max",contest.env_max if contest.env_max else 20,type='number',min=1,maximum=500,required=false) }}
           </div>
-        </div>
+        {% endcall %}
       {% endif %}
       <label class="arena-field">比赛背景图<input class="arena-input" type="file" name="cover" accept="image/png,image/jpeg,image/webp" data-image-input><small>显示在比赛首页和对应赛场。</small></label>
       <img class="arena-cover-preview" alt="比赛背景图预览" data-image-preview{% if contest and contest.cover_id %} src="{{ url_for('site.image', file_id=contest.cover_id) }}"{% else %} hidden{% endif %}>

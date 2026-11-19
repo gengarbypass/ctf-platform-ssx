@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("账号管理", "账号权限决定登录后的页面。") %}{{ ui.link("创建账号", url_for('manage.account_edit'), "primary", "plus") }}{% endcall %}
+  {% call ui.heading("账号管理", "账号权限决定登录后的页面。") %}{{ ui.link("批量导入", url_for('manage.import_page'), "", "files") }}{{ ui.link("创建账号", url_for('manage.account_edit'), "primary", "plus") }}{% endcall %}
   {% call ui.panel("账号列表") %}
     <div class="arena-table-wrap"><table class="arena-table"><caption>账号列表</caption>
       <thead><tr><th scope="col">登录账号</th><th scope="col">显示名称</th><th scope="col">权限</th><th scope="col">队伍</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>

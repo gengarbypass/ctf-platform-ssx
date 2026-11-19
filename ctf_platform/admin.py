@@ -1,3 +1,5 @@
+import csv
+import io
 import re
 import sqlite3
 
@@ -10,7 +12,7 @@ from .domain import (
     choice_field, contest_state, integer_field, new_flag, parse_local_time, text_field, username_value, validate_password,
 )
 from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix
-from .range import RangeError, stop_environment
+from .range import RangeError, probe_image, stop_environment
 from .storage import read_upload, save_upload
 from .views import PAGE_SIZE, page_number, records_kind
 
@@ -51,6 +53,13 @@ def saved(message, endpoint, **values):
     return redirect(url_for(endpoint, **values), code=303)
 
 
+def csv_response(body, filename):
+    """带 BOM 的 CSV 下载，Excel 直接打开不乱码。"""
+    from flask import Response
+    return Response("\ufeff" + body, mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
 def require_current_admin(db):
     if not db.execute(
         "SELECT 1 FROM users WHERE id = ? AND auth_version = ? AND role = 'admin' AND enabled = 1",
@@ -77,9 +86,15 @@ def overview():
         mode = g.managed["mode"]
         table = CHALLENGE_TABLES[mode]
         metrics["teams"] = db.execute("SELECT COUNT(*) FROM teams WHERE contest_id = ?", (contest_id,)).fetchone()[0]
-        metrics["challenges"] = db.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE contest_id = ? AND published = 1", (contest_id,),
-        ).fetchone()[0]
+        if mode == "puzzle":
+            metrics["challenges"] = db.execute(
+                """SELECT COUNT(*) FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
+                   WHERE cp.contest_id = ? AND p.published = 1""", (contest_id,),
+            ).fetchone()[0]
+        else:
+            metrics["challenges"] = db.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE contest_id = ? AND published = 1", (contest_id,),
+            ).fetchone()[0]
         if mode == "round":
             metrics["pending"] = db.execute(
                 "SELECT COUNT(*) FROM patches WHERE contest_id = ? AND status IN ('pending', 'testing')", (contest_id,),
@@ -197,7 +212,7 @@ def contest_delete(contest_id):
         contest = db.execute("SELECT title, active FROM contests WHERE id = ?", (contest_id,)).fetchone()
         if not contest:
             abort(404)
-        impact = "将一并删除本场比赛的队伍、赛题、提交、积分和关联文件。"
+        impact = "将一并删除本场比赛的队伍、提交、积分和关联文件；题库赛题会保留，供其他比赛复用。"
         if contest["active"]:
             impact += "当前比赛会立即下线。"
         return render_template("manage/delete.html", title="删除比赛", subject=contest["title"],
@@ -284,6 +299,130 @@ def account_edit(user_id):
     if user_id == g.user["id"]:
         session["auth_version"] = version
     return saved("账号已保存。", "manage.accounts")
+
+
+def _csv_rows(file, required):
+    """读取上传的 CSV（UTF-8，兼容 Excel BOM），校验表头，返回数据行。"""
+    if file is None or not file.filename:
+        raise FormError("请选择要导入的 CSV 文件。")
+    try:
+        text = file.stream.read().decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise FormError("CSV 文件须为 UTF-8 编码（Excel 另存为 CSV UTF-8 即可）。") from error
+    rows = [row for row in csv.reader(io.StringIO(text)) if any(cell.strip() for cell in row)]
+    if not rows:
+        raise FormError("文件内容为空。")
+    header = [cell.strip() for cell in rows[0]]
+    if header != required:
+        raise FormError(f"表头须为：{'，'.join(required)}（可从模板下载获取）。")
+    data = rows[1:]
+    if not data:
+        raise FormError("模板中没有数据行。")
+    return data
+
+
+@manage.get("/import")
+@admin_required
+def import_page():
+    return render_template("manage/import.html", title="批量导入", has_contest=bool(g.managed))
+
+
+@manage.get("/import/users-template")
+@admin_required
+def users_template():
+    body = "账号,显示名,密码,角色\nbluefox,蓝狐队长,ChangeMe-2026,player\n"
+    return csv_response(body, "users-template.csv")
+
+
+@manage.get("/import/teams-template")
+@admin_required
+def teams_template():
+    body = "队伍,账号,显示名,密码\n蓝狐突击队,fox01,队员一号,ChangeMe-2026\n蓝狐突击队,fox02,队员二号,ChangeMe-2026\n极光战队,,,\n"
+    return csv_response(body, "teams-template.csv")
+
+
+@manage.post("/import/users")
+@admin_required
+def import_users():
+    db = get_db()
+    data = _csv_rows(request.files.get("file"), ["账号", "显示名", "密码", "角色"])
+    seen, prepared = set(), []
+    for number, row in enumerate(data, start=2):
+        if len(row) < 4:
+            raise FormError(f"第 {number} 行列数不足（须为 4 列）。")
+        username = username_value(row[0])
+        if username in seen:
+            raise FormError(f"第 {number} 行账号 {username} 在文件中重复。")
+        seen.add(username)
+        name = row[1].strip()
+        if not name or len(name) > 50:
+            raise FormError(f"第 {number} 行显示名须为 1–50 个字符。")
+        password = row[2].strip()
+        validate_password(password)
+        role = row[3].strip() or "player"
+        if role not in ("player", "admin"):
+            raise FormError(f"第 {number} 行角色须为 player 或 admin。")
+        prepared.append((username, name, generate_password_hash(password), role))
+    with transaction(db, write=True):
+        for username, *_ in prepared:
+            if db.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+                raise FormError(f"账号 {username} 已存在，导入未执行（全部回滚）。")
+        db.executemany(
+            "INSERT INTO users (username, display_name, password_hash, role, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+            [(username, name, pwd, role, g.now) for username, name, pwd, role in prepared],
+        )
+    return saved(f"已导入 {len(prepared)} 个账号。", "manage.import_page")
+
+
+@manage.post("/import/teams")
+@admin_required
+def import_teams():
+    contest_id = request.form.get("contest_id", type=int)
+    db = get_db()
+    if not contest_id or not db.execute("SELECT 1 FROM contests WHERE id = ?", (contest_id,)).fetchone():
+        raise FormError("请先创建比赛（导入页会自动带上当前编辑的比赛）。")
+    data = _csv_rows(request.files.get("file"), ["队伍", "账号", "显示名", "密码"])
+    with transaction(db, write=True):
+        team_ids = {}
+        for row in db.execute("SELECT id, name FROM teams WHERE contest_id = ?", (contest_id,)):
+            team_ids[row["name"]] = row["id"]
+        users = {row["username"]: row["id"] for row in db.execute("SELECT id, username FROM users")}
+        teams_created, users_created, assigned = 0, 0, 0
+        for number, row in enumerate(data, start=2):
+            if len(row) < 4:
+                raise FormError(f"第 {number} 行列数不足（须为 4 列）。")
+            team_name = row[0].strip()
+            if not team_name or len(team_name) > 50:
+                raise FormError(f"第 {number} 行队伍名须为 1–50 个字符。")
+            if team_name not in team_ids:
+                team_ids[team_name] = db.execute(
+                    "INSERT INTO teams (contest_id, name) VALUES (?, ?)", (contest_id, team_name),
+                ).lastrowid
+                teams_created += 1
+            username = row[1].strip().lower()
+            if not username:
+                continue
+            if username in users:
+                user_id = users[username]
+            else:
+                name = row[2].strip() or username
+                password = row[3].strip()
+                validate_password(password)
+                if not re.fullmatch(r"[a-z0-9_.-]{3,40}", username):
+                    raise FormError(f"第 {number} 行账号格式无效（3–40 位小写字母、数字、点、下划线或连字符）。")
+                user_id = db.execute(
+                    "INSERT INTO users (username, display_name, password_hash, role, enabled, created_at) VALUES (?, ?, ?, 'player', 1, ?)",
+                    (username, name, generate_password_hash(password), g.now),
+                ).lastrowid
+                users[username] = user_id
+                users_created += 1
+            db.execute(
+                """INSERT INTO memberships (contest_id, user_id, team_id) VALUES (?, ?, ?)
+                   ON CONFLICT(contest_id, user_id) DO UPDATE SET team_id = excluded.team_id""",
+                (contest_id, user_id, team_ids[team_name]),
+            )
+            assigned += 1
+    return saved(f"导入完成：新增队伍 {teams_created} 支、新增账号 {users_created} 个、分队 {assigned} 人。", "manage.import_page")
 
 
 @manage.route("/accounts/<int:user_id>/delete", methods=["GET", "POST"])
@@ -412,6 +551,8 @@ def membership():
 @manage.get("/challenges/<kind>")
 @admin_required
 def challenges(kind):
+    if kind == "puzzle":
+        return redirect(url_for("manage.bank"), code=301)
     table = CHALLENGE_TABLES.get(kind)
     if not table:
         abort(404)
@@ -419,6 +560,170 @@ def challenges(kind):
         f"SELECT * FROM {table} WHERE contest_id = ? ORDER BY published DESC, id", (managed_id(kind),),
     ).fetchall() if g.managed else []
     return render_template("manage/challenges.html", title="题目管理", rows=rows, kind=kind)
+
+
+@manage.get("/bank")
+@admin_required
+def bank():
+    rows = get_db().execute(
+        """SELECT p.*, (p.env_image IS NOT NULL) AS has_env,
+                  GROUP_CONCAT(c.title, '、') AS contests
+           FROM puzzles p
+           LEFT JOIN contest_puzzles cp ON cp.puzzle_id = p.id
+           LEFT JOIN contests c ON c.id = cp.contest_id
+           GROUP BY p.id ORDER BY p.id DESC""",
+    ).fetchall()
+    return render_template("manage/bank.html", title="题库", rows=rows)
+
+
+@manage.get("/contests/<int:contest_id>/puzzles")
+@admin_required
+def contest_puzzles(contest_id):
+    db = get_db()
+    contest = db.execute("SELECT * FROM contests WHERE id = ?", (contest_id,)).fetchone()
+    if not contest or contest["mode"] != "puzzle":
+        abort(404)
+    rows = db.execute(
+        """SELECT p.id, p.title, p.category, p.points, p.published, (p.env_image IS NOT NULL) AS has_env
+           FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
+           WHERE cp.contest_id = ? ORDER BY p.id""",
+        (contest_id,),
+    ).fetchall()
+    available = db.execute(
+        """SELECT p.id, p.title, p.category, p.points FROM puzzles p
+           WHERE p.id NOT IN (SELECT puzzle_id FROM contest_puzzles WHERE contest_id = ?)
+           ORDER BY p.id DESC""",
+        (contest_id,),
+    ).fetchall()
+    return render_template("manage/contest_puzzles.html", title="比赛赛题", contest=contest,
+                           rows=rows, available=available)
+
+
+@manage.post("/contests/<int:contest_id>/puzzles/add")
+@admin_required
+def contest_puzzle_add(contest_id):
+    puzzle_id = integer_field("puzzle_id", "赛题", 1, 2**63 - 1)
+    db = get_db()
+    with transaction(db, write=True):
+        if not db.execute("SELECT 1 FROM contests WHERE id = ?", (contest_id,)).fetchone():
+            abort(404)
+        if not db.execute("SELECT 1 FROM puzzles WHERE id = ?", (puzzle_id,)).fetchone():
+            abort(404)
+        db.execute(
+            "INSERT OR IGNORE INTO contest_puzzles (contest_id, puzzle_id, added_at) VALUES (?, ?, ?)",
+            (contest_id, puzzle_id, g.now),
+        )
+    return saved("赛题已加入比赛。", "manage.contest_puzzles", contest_id=contest_id)
+
+
+@manage.post("/contests/<int:contest_id>/puzzles/remove")
+@admin_required
+def contest_puzzle_remove(contest_id):
+    puzzle_id = integer_field("puzzle_id", "赛题", 1, 2**63 - 1)
+    db = get_db()
+    with transaction(db, write=True):
+        if not db.execute("SELECT 1 FROM contests WHERE id = ?", (contest_id,)).fetchone():
+            abort(404)
+        db.execute("DELETE FROM contest_puzzles WHERE contest_id = ? AND puzzle_id = ?", (contest_id, puzzle_id))
+    return saved("赛题已移出比赛（题库保留，历史提交仍计入原成绩）。", "manage.contest_puzzles", contest_id=contest_id)
+
+
+@manage.route("/bank/new", defaults={"task_id": None}, methods=["GET", "POST"])
+@manage.route("/bank/<int:task_id>/edit", methods=["GET", "POST"])
+@admin_required
+def bank_edit(task_id):
+    db = get_db()
+    task = db.execute("SELECT * FROM puzzles WHERE id = ?", (task_id,)).fetchone() if task_id is not None else None
+    if task_id is not None and not task:
+        abort(404)
+    raw_join = request.form.get("join_contest", request.args.get("contest", "")).strip()
+    join_contest = int(raw_join) if raw_join.isdecimal() else None
+    if request.method == "GET":
+        files = db.execute(
+            """SELECT f.id, f.name FROM puzzle_files a JOIN uploads f ON f.id = a.file_id WHERE a.puzzle_id = ?""",
+            (task_id,),
+        ).fetchall() if task else []
+        return render_template("manage/challenge_form.html", title="编辑赛题" if task else "创建赛题", task=task,
+                               kind="puzzle", files=files, categories=CATEGORIES, difficulties=DIFFICULTIES,
+                               join_contest=join_contest, subtitle="题库")
+    title = text_field("title", "题目名称", 100)
+    description = text_field("description", "题目说明", 16000)
+    published = request.form.get("published") == "1"
+    category = choice_field("category", "分类", CATEGORIES)
+    difficulty = choice_field("difficulty", "难度", DIFFICULTIES)
+    points = integer_field("points", "分值", 1, 100_000)
+    env_image = request.form.get("env_image", "").strip() or None
+    env_container_port = None
+    if env_image:
+        if len(env_image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", env_image):
+            raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
+        env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
+        ok, reason = probe_image(env_image, env_container_port)
+        if not ok:
+            raise FormError(f"镜像连接检测失败：{reason}")
+    flag = text_field("flag", "Flag", 256, optional=True)
+    if not task and not flag and not env_image:
+        raise FormError("请填写 Flag；或在填写环境镜像后留空以按队伍动态生成。")
+    if not env_image and task and not flag and not task["flag_digest"]:
+        raise FormError("该赛题当前为动态环境赛题，请保留环境镜像或改填固定 Flag。")
+    salt_and_digest = new_flag(flag) if flag else (("", "") if (env_image and not task) else None)
+    uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
+    remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
+    with transaction(db, write=True):
+        if join_contest and not db.execute("SELECT 1 FROM contests WHERE id = ?", (join_contest,)).fetchone():
+            raise FormError("要加入的比赛不存在。")
+        if task:
+            if salt_and_digest:
+                db.execute("UPDATE puzzles SET flag_salt = ?, flag_digest = ? WHERE id = ?", (*salt_and_digest, task_id))
+            db.execute(
+                """UPDATE puzzles SET title = ?, category = ?, difficulty = ?, description = ?, points = ?, published = ?,
+                   env_image = ?, env_container_port = ? WHERE id = ?""",
+                (title, category, difficulty, description, points, published, env_image, env_container_port, task_id),
+            )
+        else:
+            task_id = db.execute(
+                """INSERT INTO puzzles (title, category, difficulty, description, points, flag_salt, flag_digest,
+                                        published, env_image, env_container_port)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (title, category, difficulty, description, points, *salt_and_digest, published,
+                 env_image, env_container_port),
+            ).lastrowid
+        if join_contest:
+            db.execute(
+                "INSERT OR IGNORE INTO contest_puzzles (contest_id, puzzle_id, added_at) VALUES (?, ?, ?)",
+                (join_contest, task_id, g.now),
+            )
+        for file_id in remove_ids:
+            db.execute("DELETE FROM puzzle_files WHERE puzzle_id = ? AND file_id = ?", (task_id, file_id))
+        for upload in uploads:
+            db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
+    if join_contest:
+        return saved("赛题已保存并加入比赛。", "manage.contest_puzzles", contest_id=join_contest)
+    return saved("赛题已保存。" + ("镜像连接检测通过。" if env_image else ""), "manage.bank")
+
+
+@manage.route("/bank/<int:task_id>/delete", methods=["GET", "POST"])
+@admin_required
+def bank_delete(task_id):
+    db = get_db()
+    task = db.execute("SELECT id, title FROM puzzles WHERE id = ?", (task_id,)).fetchone()
+    if not task:
+        abort(404)
+    if request.method == "GET":
+        return render_template("manage/delete.html", title="删除赛题", subject=task["title"],
+                               impact="将删除该赛题及其附件与全部提交记录，并从所有比赛中移除；相关动态环境容器会一并停止。",
+                               back=url_for("manage.bank"))
+    with transaction(db, write=True):
+        require_current_admin(db)
+        env_rows = db.execute(
+            "SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE puzzle_id = ?",
+            (task_id,),
+        ).fetchall()
+        db.execute("DELETE FROM breach_environments WHERE puzzle_id = ?", (task_id,))
+        if not db.execute("DELETE FROM puzzles WHERE id = ?", (task_id,)).rowcount:
+            abort(404)
+    purge_environments(env_rows)
+    return saved("赛题已删除。", "manage.bank")
 
 
 def breach_flag_rows(*, allow_empty_flags):
@@ -476,64 +781,19 @@ def breach_flag_rows(*, allow_empty_flags):
 @admin_required
 def challenge_edit(kind, task_id):
     table = CHALLENGE_TABLES.get(kind)
-    if not table:
+    if not table or kind == "puzzle":
         abort(404)
     contest_id = managed_id(kind)
     task = scoped_record(table, task_id, contest_id) if task_id is not None else None
     db = get_db()
     if request.method == "GET":
-        files = db.execute(
-            """SELECT f.id, f.name FROM puzzle_files a JOIN uploads f ON f.id = a.file_id WHERE a.puzzle_id = ?""",
-            (task_id,),
-        ).fetchall() if task and kind == "puzzle" else []
-        unit = "靶点" if kind == "breach" else "赛题"
-        return render_template("manage/challenge_form.html", title=f"编辑{unit}" if task else f"创建{unit}", task=task,
-                               kind=kind, files=files, categories=CATEGORIES, difficulties=DIFFICULTIES)
+        return render_template("manage/challenge_form.html", title="编辑赛题" if task else "创建赛题", task=task,
+                               kind=kind, files=[], categories=CATEGORIES, difficulties=DIFFICULTIES,
+                               join_contest=None, subtitle=g.managed["title"])
     title = text_field("title", "题目名称", 100)
     description = text_field("description", "题目说明", 16000, optional=kind == "breach")
     published = request.form.get("published") == "1"
-    if kind == "puzzle":
-        category = choice_field("category", "分类", CATEGORIES)
-        difficulty = choice_field("difficulty", "难度", DIFFICULTIES)
-        points = integer_field("points", "分值", 1, 100_000)
-        env_image = request.form.get("env_image", "").strip() or None
-        env_container_port = None
-        if env_image:
-            if len(env_image) > 200 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", env_image):
-                raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
-            env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
-        flag = text_field("flag", "Flag", 256, optional=True)
-        if not task and not flag and not env_image:
-            raise FormError("请填写 Flag；或在填写环境镜像后留空以按队伍动态生成。")
-        if not env_image and task and not flag and not task["flag_digest"]:
-            raise FormError("该赛题当前为动态环境赛题，请保留环境镜像或改填固定 Flag。")
-        salt_and_digest = new_flag(flag) if flag else (("", "") if (env_image and not task) else None)
-        uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
-        remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
-        with transaction(db, write=True):
-            managed_id(kind)
-            if task:
-                if salt_and_digest:
-                    db.execute("UPDATE puzzles SET flag_salt = ?, flag_digest = ? WHERE id = ?", (*salt_and_digest, task_id))
-                db.execute(
-                    """UPDATE puzzles SET title = ?, category = ?, difficulty = ?, description = ?, points = ?, published = ?,
-                       env_image = ?, env_container_port = ?
-                       WHERE id = ? AND contest_id = ?""",
-                    (title, category, difficulty, description, points, published, env_image, env_container_port, task_id, contest_id),
-                )
-            else:
-                task_id = db.execute(
-                    """INSERT INTO puzzles (contest_id, title, category, difficulty, description, points, flag_salt, flag_digest,
-                                           published, env_image, env_container_port)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (contest_id, title, category, difficulty, description, points, *salt_and_digest, published,
-                     env_image, env_container_port),
-                ).lastrowid
-            for file_id in remove_ids:
-                db.execute("DELETE FROM puzzle_files WHERE puzzle_id = ? AND file_id = ?", (task_id, file_id))
-            for upload in uploads:
-                db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
-    elif kind == "breach":
+    if kind == "breach":
         if task:
             layer = text_field("layer", "所属层级", 40)
             points = integer_field("points", "分值", 1, 100_000)

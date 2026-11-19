@@ -9,6 +9,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from threading import Barrier
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -127,12 +128,16 @@ class PlatformTest(unittest.TestCase):
         return self.login(username), team_id
 
     def puzzle(self, contest_id, *, attachment=True):
-        data = {"contest_id": contest_id, "title": "镜像回廊", "category": "Web", "difficulty": "进阶",
-                "points": 200, "description": "核对样例中的导航标签。", "flag": "flag{fixture}", "published": "1"}
+        data = {"title": "镜像回廊", "category": "Web", "difficulty": "进阶",
+                "points": 200, "description": "核对样例中的导航标签。", "flag": "flag{fixture}",
+                "published": "1", "join_contest": contest_id}
         if attachment:
             data["attachments"] = (io.BytesIO(b"Navigation sample"), "sample.txt")
-        self.post(self.admin, "/manage/challenges/puzzle/new", **data)
-        return self.lookup("SELECT id FROM puzzles WHERE contest_id = ?", (contest_id,))[0][0]
+        self.post(self.admin, "/manage/bank/new", **data)
+        return self.lookup(
+            "SELECT cp.puzzle_id FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id "
+            "WHERE cp.contest_id = ? AND p.title = '镜像回廊' ORDER BY cp.puzzle_id DESC", (contest_id,),
+        )[0][0]
 
     def round_task(self, contest_id):
         self.post(self.admin, "/manage/challenges/round/new", contest_id=contest_id, title="档案检索",
@@ -417,12 +422,16 @@ class PlatformTest(unittest.TestCase):
         contest_id = self.contest("蓝域杯 · 动态解题赛", mode="puzzle")
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")
         other, other_team = self.player(contest_id, "packetlab", "PacketLab")
-        self.post(self.admin, "/manage/challenges/puzzle/new", contest_id=contest_id,
-                  title="容器入口", category="Web", difficulty="入门", points=100,
-                  description="读取容器内 FLAG", env_image="nginx:alpine", env_container_port="80", published="1")
+        with patch("ctf_platform.admin.probe_image", return_value=(True, "")):
+            self.post(self.admin, "/manage/bank/new", join_contest=contest_id,
+                      title="容器入口", category="Web", difficulty="入门", points=100,
+                      description="读取容器内 FLAG", env_image="nginx:alpine", env_container_port="80", published="1")
         puzzle_id = self.lookup("SELECT id FROM puzzles WHERE env_image IS NOT NULL")[0][0]
         self.puzzle(contest_id)
-        static_id = self.lookup("SELECT id FROM puzzles WHERE contest_id = ? AND env_image IS NULL", (contest_id,))[0][0]
+        static_id = self.lookup(
+            "SELECT p.id FROM puzzles p WHERE p.env_image IS NULL "
+            "AND p.id IN (SELECT puzzle_id FROM contest_puzzles WHERE contest_id = ?)", (contest_id,),
+        )[0][0]
         page = player.get(f"/challenges/{puzzle_id}").get_data(as_text=True)
         self.assertIn("启动环境", page)
         self.assertIn("动态环境", player.get("/challenges?category=Web").get_data(as_text=True))
@@ -460,14 +469,48 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("重启环境", again)
         self.assertNotIn(":8400</a>", again)
         # 编辑保留动态属性并更新镜像
-        self.post(self.admin, f"/manage/challenges/puzzle/{puzzle_id}/edit", contest_id=contest_id,
-                  title="容器入口", category="Web", difficulty="入门", points=120,
-                  description="同上", env_image="nginx:alpine", env_container_port="8080", published="1")
+        with patch("ctf_platform.admin.probe_image", return_value=(True, "")):
+            self.post(self.admin, f"/manage/bank/{puzzle_id}/edit",
+                      title="容器入口", category="Web", difficulty="入门", points=120,
+                      description="同上", env_image="nginx:alpine", env_container_port="8080", published="1")
         row = self.lookup("SELECT points, env_image, env_container_port, flag_digest FROM puzzles WHERE id = ?", (puzzle_id,))[0]
         self.assertEqual((row["points"], row["env_image"], row["env_container_port"], row["flag_digest"]),
                          (120, "nginx:alpine", 8080, ""))
-        # 比赛表单展示解题赛环境配置
-        self.assertIn("env_ttl_minutes", self.admin.get(f"/manage/contests/{contest_id}/edit").get_data(as_text=True))
+        # 比赛创建表单已瘦化：解题赛不再出现环境配置字段（改为默认值）
+        self.assertNotIn("env_ttl_minutes", self.admin.get("/manage/contests/new").get_data(as_text=True))
+
+    def test_import_users_and_teams(self):
+        contest_id = self.contest("导入验证赛", active=False)
+        users_csv = "账号,显示名,密码,角色\nfox01,狐狸一号,ImportPass-01,player\nfox02,狐狸二号,ImportPass-02,player\nchief,指挥官,ImportPass-03,admin\n"
+        self.post(self.admin, "/manage/import/users",
+                  file=(io.BytesIO(users_csv.encode("utf-8")), "users.csv"))
+        self.assertEqual(len(self.lookup("SELECT id FROM users WHERE username LIKE 'fox%'")), 2)
+        # 重复导入整体回滚
+        self.post(self.admin, "/manage/import/users", code=400,
+                  file=(io.BytesIO(users_csv.encode("utf-8")), "users.csv"))
+        teams_csv = ("队伍,账号,显示名,密码\n"
+                     "蓝狐突击队,fox01,狐狸一号,\n"
+                     "蓝狐突击队,fox03,新队员,ImportPass-04\n"
+                     "极光战队,,,\n")
+        self.post(self.admin, "/manage/import/teams", contest_id=contest_id,
+                  file=(io.BytesIO(teams_csv.encode("utf-8")), "teams.csv"))
+        self.assertEqual(len(self.lookup("SELECT id FROM teams WHERE contest_id = ?", (contest_id,))), 2)
+        self.assertEqual(len(self.lookup("SELECT id FROM users WHERE username = 'fox03'")), 1)
+        memberships = self.lookup("SELECT team_id, user_id FROM memberships WHERE contest_id = ?", (contest_id,))
+        self.assertEqual(len(memberships), 2)
+        # 题库独立创建（不挂任何比赛）后再加入比赛
+        self.post(self.admin, "/manage/bank/new",
+                  title="独立题", category="Misc", difficulty="入门", points=50,
+                  description="题库题", flag="flag{bank}", published="1")
+        bank_id = self.lookup("SELECT id FROM puzzles WHERE title = '独立题'")[0][0]
+        self.assertEqual(self.lookup("SELECT COUNT(*) FROM contest_puzzles WHERE puzzle_id = ?", (bank_id,))[0][0], 0)
+        self.post(self.admin, f"/manage/contests/{contest_id}/puzzles/add", puzzle_id=bank_id)
+        self.assertEqual(self.lookup("SELECT COUNT(*) FROM contest_puzzles WHERE puzzle_id = ?", (bank_id,))[0][0], 1)
+        rows = self.admin.get(f"/manage/contests/{contest_id}/puzzles").get_data(as_text=True)
+        self.assertIn("独立题", rows)
+        self.post(self.admin, f"/manage/contests/{contest_id}/puzzles/remove", puzzle_id=bank_id)
+        self.assertEqual(self.lookup("SELECT COUNT(*) FROM contest_puzzles WHERE puzzle_id = ?", (bank_id,))[0][0], 0)
+        self.assertEqual(self.lookup("SELECT id FROM puzzles WHERE id = ?", (bank_id,))[0][0], bank_id)
 
     def test_scheduled_access_and_persistence(self):
         contest_id = self.contest(upcoming=True)
@@ -518,7 +561,7 @@ class PlatformTest(unittest.TestCase):
         puzzle_id = self.puzzle(puzzle_contest)
         file_id = self.lookup("SELECT file_id FROM puzzle_files WHERE puzzle_id = ?", (puzzle_id,))[0][0]
         download = f"/downloads/{file_id}"
-        self.assertIn("待开放", self.admin.get("/manage/challenges/puzzle").get_data(as_text=True))
+        self.assertIn("待开放", self.admin.get(f"/manage/contests/{puzzle_contest}/puzzles").get_data(as_text=True))
         self.assertEqual(self.admin.get(download).data, b"Navigation sample")
         player, _ = self.player(puzzle_contest, "bluefox", "BlueFox")
         self.assertEqual(player.get(download).status_code, 404)
@@ -547,7 +590,9 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("未开启 · 筹备中", task_list)
         self.assertIn("档案检索新版", task_list)
         self.assertIn("待开放", task_list)
-        self.assertEqual(self.admin.get("/manage/challenges/puzzle").status_code, 404)
+        legacy = self.admin.get("/manage/challenges/puzzle")
+        self.assertEqual(legacy.status_code, 301)
+        self.assertEqual(legacy.location, "/manage/bank")
         detail = f"/awdp/challenges/{task_id}"
         waiting = player.get("/awdp").get_data(as_text=True)
         self.assertNotIn("测试赛", waiting)
@@ -606,9 +651,10 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 6)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 7)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
+        self.assertEqual(self.lookup("SELECT contest_id FROM contest_puzzles")[0][0], mixed)
         self.assertEqual(len(self.lookup("SELECT id FROM round_tasks")), 2)
         contest = self.lookup("SELECT * FROM contests WHERE id = ?", (mixed,))[0]
         timezone = upgraded.config["TIME_ZONE"]
@@ -650,12 +696,14 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, route)
         self.assertEqual(self.admin.get(route).status_code, 404)
         self.assertEqual([row["id"] for row in self.lookup("SELECT id FROM contests")], [other_id])
-        self.assertEqual([row["contest_id"] for row in self.lookup("SELECT contest_id FROM puzzles")], [other_id])
+        self.assertEqual([row["contest_id"] for row in self.lookup("SELECT contest_id FROM contest_puzzles")], [other_id])
+        self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 2)
         self.assertEqual(self.lookup("SELECT * FROM teams WHERE id = ?", (team_id,)), [])
         self.assertEqual(self.lookup("SELECT * FROM memberships"), [])
         self.assertEqual(self.lookup("SELECT * FROM flag_submissions"), [])
-        self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id IN (?, ?)", (cover_id, file_id)), [])
-        self.assertEqual(len(self.lookup("SELECT id FROM uploads")), 2)
+        self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id = ?", (cover_id,)), [])
+        self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id = ?", (file_id,))[0][0], file_id)
+        self.assertEqual(len(self.lookup("SELECT id FROM uploads")), 3)
         self.assertEqual(len(self.lookup("SELECT id FROM users")), 2)
         self.assertIsNone(player.get("/api/scoreboard/puzzle").json["timing"]["id"])
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])

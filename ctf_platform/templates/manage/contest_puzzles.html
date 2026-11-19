@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回比赛配置", url_for('manage.contests'), "link", "back") }}</div>
+  {% call ui.heading("比赛赛题", contest.title ~ " · 准备阶段与开赛后均可增删") %}
+    {{ ui.link("创建新赛题", url_for('manage.bank_edit', contest=contest.id), "primary", "plus") }}
+  {% endcall %}
+  {% call ui.panel("从题库添加") %}
+    {% if available %}
+    <form class="arena-form" method="post" action="{{ url_for('manage.contest_puzzle_add', contest_id=contest.id) }}">
+      {{ ui.csrf() }}
+      <div class="arena-two">
+        <label class="arena-field">选择赛题
+          <select class="arena-input" name="puzzle_id">
+            {% for item in available %}<option value="{{ item.id }}">{{ item.title }}（{{ item.category }} · {{ item.points }} 分）</option>{% endfor %}
+          </select>
+        </label>
+        <div class="arena-field" style="align-self:end">
+          <button class="arena-btn primary" type="submit">加入比赛</button>
+        </div>
+      </div>
+    </form>
+    {% else %}
+      <p class="arena-muted">题库中没有可添加的赛题，可先到题库创建，或点右上角「创建新赛题」（保存后自动加入本场比赛）。</p>
+    {% endif %}
+  {% endcall %}
+  {% set open = contest.active and contest_state(contest, g.now).status != 'upcoming' %}
+  {% call ui.panel("本场比赛的赛题") %}
+    {% if rows %}
+    <div class="arena-table-wrap"><table class="arena-table"><caption>已加入赛题</caption>
+      <thead><tr><th scope="col">题目</th><th scope="col">分类</th><th scope="col">分值</th><th scope="col">环境</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+      <tbody>{% for row in rows %}<tr>
+        <td><strong>{{ row.title }}</strong></td>
+        <td>{{ row.category }}</td>
+        <td>{{ row.points }}</td>
+        <td>{{ ui.pill("动态容器", "success") if row.has_env else ui.pill("静态 Flag", "neutral") }}</td>
+        <td>{{ ui.pill(("已开放" if open else "待开放") if row.published else "草稿", "success" if row.published and open else "neutral") }}</td>
+        <td><div class="arena-actions">
+          {{ ui.link("编辑", url_for('manage.bank_edit', task_id=row.id), "link") }}
+          <form action="{{ url_for('manage.contest_puzzle_remove', contest_id=contest.id) }}" method="post">{{ ui.csrf() }}<input type="hidden" name="puzzle_id" value="{{ row.id }}"><button class="arena-link" type="submit">移出比赛</button></form>
+        </div></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}{{ ui.empty("尚未添加赛题。") }}{% endif %}
+  {% endcall %}
+{% endblock %}
