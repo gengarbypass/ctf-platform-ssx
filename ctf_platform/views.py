@@ -1,12 +1,15 @@
 import hashlib
 import hmac
 import secrets
+import sqlite3
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
-from .db import get_db, transaction
+from .db import connect, get_db, transaction
 from .domain import (
     CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, FormError, contest_schedule, contest_state, env_flag_value,
     flag_digest, login_required, local_time, round_segments, text_field,
@@ -15,7 +18,7 @@ from .range import RangeError, start_environment, stop_environment
 from .queries import (
     add_score, breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
     patch_records, puzzle_player_rankings, puzzle_rankings, round_rankings, round_targets, round_trend,
-    score_records, service_matrix,
+    score_records, service_matrix, team_list,
 )
 from .storage import read_upload, save_upload, serve_upload
 
@@ -273,6 +276,136 @@ def environment_host():
     if configured:
         return configured
     return request.host.rsplit(":", 1)[0] if request.host else "127.0.0.1"
+
+
+_autostart_guard = threading.Lock()
+_autostart_running = set()
+
+
+def round_env_targets(db, contest_id):
+    """比赛中已发布且配置环境镜像的 AWDP 靶机。"""
+    return db.execute(
+        """SELECT p.* FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
+           WHERE cp.contest_id = ? AND p.kind = 'round' AND p.published = 1 AND p.env_image IS NOT NULL
+           ORDER BY p.id""", (contest_id,),
+    ).fetchall()
+
+
+def missing_round_environments(db, contest_id, targets):
+    """统计缺少运行环境的「队伍 × 靶机」组合数（每对唯一，按行数即组合数）。"""
+    placeholders = ",".join("?" * len(targets))
+    covered = db.execute(
+        f"""SELECT COUNT(*) FROM breach_environments WHERE contest_id = ? AND puzzle_id IN ({placeholders})
+           AND status IN ('starting', 'running')""",
+        (contest_id, *[target["id"] for target in targets]),
+    ).fetchone()[0]
+    teams = db.execute("SELECT COUNT(*) FROM contest_teams WHERE contest_id = ?", (contest_id,)).fetchone()[0]
+    return teams * len(targets) - covered
+
+
+def autostart_round_targets(app, contest_id):
+    """为全部队伍启动所有已发布靶机容器：整场运行（到期=比赛结束）、幂等可重入、失败按环境行记录。"""
+    with app.app_context():
+        db = connect(app.config["DATABASE"])
+        try:
+            contest = db.execute("SELECT * FROM contests WHERE id = ?", (contest_id,)).fetchone()
+            if contest is None or contest_state(contest, int(time.time()))["status"] == "upcoming":
+                return
+            targets = round_env_targets(db, contest_id)
+            teams = team_list(db, contest_id)
+            if not targets or not teams:
+                return
+            now = int(time.time())
+            pending = []
+            for team in teams:
+                for target in targets:
+                    env = db.execute(
+                        "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
+                        (contest_id, team["id"], target["id"]),
+                    ).fetchone()
+                    try:
+                        with transaction(db, write=True):
+                            if env and env["status"] in ("starting", "running"):
+                                # 已在运行：把到期时间统一续到比赛结束
+                                if env["expires_at"] != contest["end_at"]:
+                                    db.execute("UPDATE breach_environments SET expires_at = ? WHERE id = ?",
+                                               (contest["end_at"], env["id"]))
+                                continue
+                            port = env["host_port"] if env and env["host_port"] else allocate_environment_port(db)
+                            if env:
+                                db.execute(
+                                    """UPDATE breach_environments SET status = 'starting', last_error = '',
+                                       expires_at = ?, container_id = '', network_id = '' WHERE id = ?""",
+                                    (contest["end_at"], env["id"]),
+                                )
+                                env_id, secret = env["id"], env["secret"]
+                            else:
+                                secret = secrets.token_hex(32)
+                                env_id = db.execute(
+                                    """INSERT INTO breach_environments
+                                       (contest_id, team_id, puzzle_id, secret, host_port, status, created_at, expires_at)
+                                       VALUES (?, ?, ?, ?, ?, 'starting', ?, ?)""",
+                                    (contest_id, team["id"], target["id"], secret, port, now, contest["end_at"]),
+                                ).lastrowid
+                    except sqlite3.IntegrityError:
+                        continue  # 多进程并发触发：该环境已由其他进程建立，交给下一轮补齐
+                    pending.append((env_id, secret, port, team, target))
+            if not pending:
+                return
+
+            def launch(item):
+                env_id, secret, port, team, target = item
+                derived = env_flag_value(secret, env_id, target["id"])
+                flag_env = {"FLAG": derived, f"FLAG_{target['id']}": derived}
+                try:
+                    with app.app_context():
+                        container_id, network_id = start_environment(
+                            contest=contest, team=team, image=target["env_image"],
+                            container_port=target["env_container_port"], host_port=port,
+                            flag_env=flag_env, puzzle_id=target["id"],
+                        )
+                except RangeError as error:
+                    return env_id, "error", "", "", str(error)
+                return env_id, "running", container_id, network_id, ""
+
+            with ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
+                for env_id, status, container_id, network_id, error in pool.map(launch, pending):
+                    with transaction(db, write=True):
+                        if status == "running":
+                            db.execute(
+                                """UPDATE breach_environments SET status = 'running', container_id = ?,
+                                   network_id = ?, started_at = ? WHERE id = ?""",
+                                (container_id, network_id, now, env_id),
+                            )
+                        else:
+                            db.execute(
+                                "UPDATE breach_environments SET status = 'error', last_error = ?, stopped_at = ? WHERE id = ?",
+                                (error, now, env_id),
+                            )
+        finally:
+            db.close()
+
+
+def spawn_autostart(app, contest_id):
+    """后台补齐全场靶机；TESTING 下同步执行以保证测试确定性，运行中防重入。"""
+    # current_app 是线程绑定的代理，跨线程前解出真实应用对象
+    app = app._get_current_object() if hasattr(app, "_get_current_object") else app
+    with _autostart_guard:
+        if contest_id in _autostart_running:
+            return
+        _autostart_running.add(contest_id)
+
+    def run():
+        try:
+            autostart_round_targets(app, contest_id)
+        finally:
+            with _autostart_guard:
+                _autostart_running.discard(contest_id)
+
+    if app.config.get("TESTING"):
+        run()
+    else:
+        threading.Thread(target=run, daemon=True, name=f"awdp-autostart-{contest_id}").start()
 
 
 def allocate_environment_port(db):
@@ -566,6 +699,11 @@ def awdp():
             "patches": patch_records(db, contest_id, team_id=team_id, limit=10) if team_id else [],
             "standings": round_rankings(db, contest_id),
         }
+        # 开赛后补齐全场靶机：新加入的队伍/靶机也会在此自动补启
+        if g.match["status"] != "upcoming":
+            env_targets = round_env_targets(db, contest_id)
+            if env_targets and missing_round_environments(db, contest_id, env_targets) > 0:
+                spawn_autostart(current_app, contest_id)
     return render_template("awdp.html", title="AWDP", view=view, data=data)
 
 

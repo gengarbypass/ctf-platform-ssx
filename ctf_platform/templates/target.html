@@ -8,11 +8,11 @@
   {% if target.env_image %}
     {% call ui.panel("靶机环境") %}
       {% if not g.team %}
-        <div class="arena-detail-copy"><p>加入当前比赛的队伍后即可启动本队的专属靶机。</p></div>
+        <div class="arena-detail-copy"><p>各队伍的靶机由平台在开赛后统一开启；加入比赛队伍后此处显示本队靶机地址。</p></div>
       {% elif not environment or environment.status == 'stopped' %}
-        <div class="arena-detail-copy"><p>启动后将获得本队专属容器与端口，本队 Flag 由平台生成本队注入容器；攻击其他队伍靶机可获得攻击积分。</p></div>
+        <div class="arena-detail-copy"><p>靶机由平台在开赛后为全部队伍统一开启并持续整个比赛周期；当前未运行时可点击重启，地址与 Flag 保持不变。</p></div>
         <form class="arena-actions" action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">
-          {{ ui.csrf() }}<button class="arena-btn primary" type="submit">{{ ui.icon('plus') }}{{ '重启靶机' if environment else '启动靶机' }}</button>
+          {{ ui.csrf() }}<button class="arena-btn primary" type="submit">{{ ui.icon('plus') }}重启靶机</button>
         </form>
       {% elif environment.status == 'starting' %}
         <div class="arena-detail-copy"><p>靶机启动中，稍候自动刷新…</p></div>
@@ -27,15 +27,14 @@
           <dl class="arena-detail-data">
             <div><dt>本队靶机地址</dt><dd><a class="arena-mono" href="http://{{ environment_host }}:{{ environment.host_port }}" target="_blank" rel="noopener">http://{{ environment_host }}:{{ environment.host_port }}</a></dd></div>
             {% if environment.expires_at %}
-            <div><dt>剩余时间</dt><dd><time class="arena-mono" data-clock-end="{{ environment.expires_at }}" data-server-now="{{ g.now }}">{{ countdown(environment.expires_at - g.now) }}</time></dd></div>
+            <div><dt>运行至</dt><dd><time class="arena-mono" data-clock-end="{{ environment.expires_at }}" data-server-now="{{ g.now }}">{{ countdown(environment.expires_at - g.now) }}</time></dd></div>
             {% endif %}
             <div><dt>状态</dt><dd>{{ ui.pill(env_statuses[environment.status], 'success') }}</dd></div>
           </dl>
-          <p>本队 Flag 只对本队环境有效；重启靶机后地址与 Flag 保持不变。</p>
+          <p>所有队伍的靶机由平台在开赛后统一开启，持续至比赛结束；本队 Flag 只对本队环境有效，重启靶机后地址与 Flag 保持不变。</p>
         </div>
         <div class="arena-actions">
           <form action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">重启靶机</button></form>
-          <form action="{{ url_for('site.stop_target_environment', target_id=target.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">停止靶机</button></form>
         </div>
       {% endif %}
       {% if rivals %}
@@ -72,7 +71,7 @@
       <form class="arena-form" action="{{ url_for('site.submit_target_flag', target_id=target.id) }}" method="post">
         {{ ui.csrf() }}<label class="arena-field">Flag<input class="arena-input arena-mono" name="flag" type="text" placeholder="flag{…}" maxlength="256" spellcheck="false" autocomplete="off" required></label>
         <div class="arena-actions"><button class="arena-btn primary" type="submit">提交 Flag</button></div>
-        <small class="arena-muted">提交其他队伍靶机中提取的 Flag 可获得攻击积分；每队每靶机仅计一次。</small>
+        <small class="arena-muted">每台靶机内包含多个靶点，提交从<b>其他队伍</b>靶机中提取的任意靶点 Flag 均可获得攻击积分；每队每靶机仅计一次（本队靶机的 Flag 不计分）。</small>
       </form>
       {% endif %}
     {% endcall %}

@@ -3,7 +3,7 @@ import io
 import re
 import sqlite3
 
-from flask import Blueprint, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import generate_password_hash
 
 from .db import get_db, transaction
@@ -14,7 +14,7 @@ from .domain import (
 from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix
 from .range import RangeError, probe_image, stop_environment
 from .storage import crop_cover, read_upload, save_upload
-from .views import PAGE_SIZE, page_number, records_kind
+from .views import PAGE_SIZE, page_number, records_kind, spawn_autostart
 
 
 def purge_environments(env_rows):
@@ -212,6 +212,10 @@ def activate_contest(contest_id):
             abort(404)
         db.execute("UPDATE contests SET active = 0 WHERE active = 1")
         db.execute("UPDATE contests SET active = 1 WHERE id = ?", (contest_id,))
+    contest = db.execute("SELECT mode FROM contests WHERE id = ?", (contest_id,)).fetchone()
+    if contest and contest["mode"] == "round":
+        # AWDP 开赛即为全场队伍自动开启所有已发布靶机，持续至比赛结束
+        spawn_autostart(current_app, contest_id)
     session["manage_contest_id"] = contest_id
     return saved("当前比赛已切换。", "manage.contests")
 
@@ -733,6 +737,11 @@ def contest_puzzle_add(contest_id):
             "INSERT OR IGNORE INTO contest_puzzles (contest_id, puzzle_id, added_at) VALUES (?, ?, ?)",
             (contest_id, puzzle_id, g.now),
         )
+    if contest_row["mode"] == "round" and db.execute(
+        "SELECT env_image FROM puzzles WHERE id = ?", (puzzle_id,),
+    ).fetchone()[0]:
+        # 比赛中途加入新靶机：随即为全场队伍补启该靶机环境
+        spawn_autostart(current_app, contest_id)
     return saved("赛题已加入比赛。", "manage.contest_puzzles", contest_id=contest_id)
 
 
@@ -841,6 +850,9 @@ def bank_edit(task_id):
             db.execute("DELETE FROM puzzle_files WHERE puzzle_id = ? AND file_id = ?", (task_id, file_id))
         for upload in uploads:
             db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
+    if join_contest and kind == "round" and env_image:
+        # 比赛中新建靶机：随即为全场队伍补启该靶机环境
+        spawn_autostart(current_app, join_contest)
     if join_contest:
         return saved(f"{unit}已保存并加入比赛。", "manage.contest_puzzles", contest_id=join_contest)
     return saved(f"{unit}已保存。", "manage.bank")

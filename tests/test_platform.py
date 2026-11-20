@@ -537,18 +537,17 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("进入靶机", arena)
         self.assertIn("档案检索", arena)
 
-        # 双方各自启动靶机容器，端口依次分配
-        self.post(player, f"/awdp/targets/{target_id}/env/start")
-        env_a = self.lookup("SELECT * FROM breach_environments WHERE puzzle_id = ?", (target_id,))[0]
+        # 全场靶机由平台自动开启：访问 AWDP 页面即补齐所有队伍的靶机环境
+        env_a = self.lookup(
+            "SELECT * FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (target_id, team_a))[0]
         self.assertEqual((env_a["status"], env_a["host_port"]), ("running", 8400))
         run = fake.state["runs"][0]
         self.assertEqual((run["image"], run["ports"]), ("nginx:alpine", {"80/tcp": 8400}))
         flag_a = env_flag_value(env_a["secret"], env_a["id"], target_id)
         self.assertEqual(run["environment"]["FLAG"], flag_a)
-        self.post(other, f"/awdp/targets/{target_id}/env/start")
         env_b = self.lookup(
             "SELECT * FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (target_id, team_b))[0]
-        self.assertEqual(env_b["host_port"], 8401)
+        self.assertEqual((env_b["status"], env_b["host_port"]), ("running", 8401))
         flag_b = env_flag_value(env_b["secret"], env_b["id"], target_id)
 
         # 详情页展示双方在线靶机地址与修复文档入口
@@ -627,6 +626,49 @@ class PlatformTest(unittest.TestCase):
                                      (contest_id,))[0][0], 0)
         # 切换到解题赛后，靶机页面不可访问
         self.assertEqual(other.get(f"/awdp/targets/{target_id}").status_code, 404)
+
+    def test_awdp_targets_autostart_for_all_teams(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest("蓝域杯 · 全场靶机开启", mode="round", active=False)
+        target_id = self.awdp_target(contest_id, env_image="nginx:alpine", points=200)
+        self.awdp_target(contest_id, title="静态靶机", points=120, flag="flag{static_only}")
+        player, team_a = self.player(contest_id, "bluefox", "BlueFox")
+        other, team_b = self.player(contest_id, "packetlab", "PacketLab")
+
+        # 激活比赛：全场靶机自动为所有队伍开启，运行至比赛结束
+        self.post(self.admin, f"/manage/contests/{contest_id}/activate")
+        end_at = self.lookup("SELECT end_at FROM contests WHERE id = ?", (contest_id,))[0][0]
+        envs = self.lookup("SELECT team_id, status, host_port, expires_at FROM breach_environments ORDER BY host_port")
+        self.assertEqual([tuple(row) for row in envs], [
+            (team_a, "running", 8400, end_at), (team_b, "running", 8401, end_at)])
+        self.assertEqual(len(fake.state["runs"]), 2)
+        flag_values = {run["environment"]["FLAG"] for run in fake.state["runs"]}
+        self.assertEqual(len(flag_values), 2)  # 各队派生的 Flag 互不相同
+        # 无镜像靶机不创建环境
+        self.assertEqual(self.lookup(
+            "SELECT COUNT(*) FROM breach_environments e JOIN puzzles p ON p.id = e.puzzle_id "
+            "WHERE p.env_image IS NULL")[0][0], 0)
+
+        # 比赛中新增靶机：加入比赛后随即自动补启全场环境
+        target2 = self.awdp_target(contest_id, title="追加靶机", env_image="nginx:alpine", points=150)
+        added = self.lookup(
+            "SELECT team_id, host_port FROM breach_environments WHERE puzzle_id = ? ORDER BY host_port", (target2,))
+        self.assertEqual([row["host_port"] for row in added], [8402, 8403])
+        self.assertEqual(sorted(row["team_id"] for row in added), sorted([team_a, team_b]))
+
+        # 攻击判定不受自动开启影响：B 提交 A 队派生 Flag 得攻击分
+        env_a = self.lookup(
+            "SELECT * FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (target_id, team_a))[0]
+        hit = self.post(other, f"/awdp/targets/{target_id}/flag",
+                        flag=env_flag_value(env_a["secret"], env_a["id"], target_id), follow=True, code=200)
+        self.assertIn("Flag 正确", hit.get_data(as_text=True))
+        self.assertEqual([tuple(r) for r in self.lookup("SELECT kind, delta, round_no FROM score_events")],
+                         [("attack", 200, 1)])
+        # 详情页不再提供停止按钮（靶机由平台统一管理）
+        detail = other.get(f"/awdp/targets/{target_id}").get_data(as_text=True)
+        self.assertIn("重启靶机", detail)
+        self.assertNotIn("停止靶机", detail)
 
     def test_contest_cover_upload_crops_to_selection(self):
         def png_stream():
