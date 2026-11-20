@@ -62,5 +62,19 @@
         </table></div>
       {% else %}{{ ui.empty("暂无开放的赛题。") }}{% endif %}
     {% endcall %}
+    {% call ui.panel("AWDP 靶机") %}
+      {% if data.targets %}
+        <div class="arena-table-wrap"><table class="arena-table"><caption>靶机列表</caption>
+          <thead><tr><th scope="col">靶机</th><th scope="col">分值</th><th scope="col">环境</th><th scope="col">攻破队伍</th>{% if g.team %}<th scope="col">本队状态</th>{% endif %}<th scope="col">操作</th></tr></thead>
+          <tbody>{% for target in data.targets %}<tr>
+            <td><strong>{{ target.title }}</strong></td><td class="arena-number">{{ target.points }}</td>
+            <td>{{ ui.pill("动态容器", "success") if target.has_env else ui.pill("静态 Flag", "neutral") }}</td>
+            <td class="arena-number">{{ target.solves }}</td>
+            {% if g.team %}<td>{{ ui.pill("已攻破", "success") if target.solved else ui.pill("未攻破", "neutral") }}</td>{% endif %}
+            <td>{{ ui.link("进入靶机", url_for('site.round_target', target_id=target.id), "link", "next") }}</td>
+          </tr>{% endfor %}</tbody>
+        </table></div>
+      {% else %}{{ ui.empty("本场暂未加入靶机；可在题库创建 AWDP 靶机后加入比赛。") }}{% endif %}
+    {% endcall %}
   {% endif %}
 {% endblock %}

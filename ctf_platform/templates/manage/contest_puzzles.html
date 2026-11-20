@@ -1,16 +1,21 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
+  {% set unit = unit if unit is defined and unit else '赛题' %}
   <div class="arena-back">{{ ui.link("返回比赛配置", url_for('manage.contests'), "link", "back") }}</div>
-  {% call ui.heading("比赛赛题", contest.title ~ " · 准备阶段与开赛后均可增删") %}
-    {{ ui.link("创建新赛题", url_for('manage.bank_edit', contest=contest.id), "primary", "plus") }}
+  {% call ui.heading("比赛" ~ unit, contest.title ~ " · 准备阶段与开赛后均可增删") %}
+    {% if contest.mode == 'round' %}
+      {{ ui.link("创建新" ~ unit, url_for('manage.bank_edit', contest=contest.id, kind='round'), "primary", "plus") }}
+    {% else %}
+      {{ ui.link("创建新" ~ unit, url_for('manage.bank_edit', contest=contest.id), "primary", "plus") }}
+    {% endif %}
   {% endcall %}
   {% call ui.panel("从题库添加") %}
     {% if available %}
     <form class="arena-form" method="post" action="{{ url_for('manage.contest_puzzle_add', contest_id=contest.id) }}">
       {{ ui.csrf() }}
       <div class="arena-two">
-        <label class="arena-field">选择赛题
+        <label class="arena-field">选择{{ unit }}
           <select class="arena-input" name="puzzle_id">
             {% for item in available %}<option value="{{ item.id }}">{{ item.title }}（{{ item.category }} · {{ item.points }} 分）</option>{% endfor %}
           </select>
@@ -21,13 +26,13 @@
       </div>
     </form>
     {% else %}
-      <p class="arena-muted">题库中没有可添加的赛题，可先到题库创建，或点右上角「创建新赛题」（保存后自动加入本场比赛）。</p>
+      <p class="arena-muted">题库中没有可添加的{{ unit }}，可先到题库创建，或点右上角「创建新{{ unit }}」（保存后自动加入本场比赛）。</p>
     {% endif %}
   {% endcall %}
   {% set open = contest.active and contest_state(contest, g.now).status != 'upcoming' %}
-  {% call ui.panel("本场比赛的赛题") %}
+  {% call ui.panel("本场比赛的" ~ unit) %}
     {% if rows %}
-    <div class="arena-table-wrap"><table class="arena-table"><caption>已加入赛题</caption>
+    <div class="arena-table-wrap"><table class="arena-table"><caption>已加入{{ unit }}</caption>
       <thead><tr><th scope="col">题目</th><th scope="col">分类</th><th scope="col">分值</th><th scope="col">环境</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
       <tbody>{% for row in rows %}<tr>
         <td><strong>{{ row.title }}</strong></td>
@@ -41,6 +46,6 @@
         </div></td>
       </tr>{% endfor %}</tbody>
     </table></div>
-    {% else %}{{ ui.empty("尚未添加赛题。") }}{% endif %}
+    {% else %}{{ ui.empty("尚未添加" ~ unit ~ "。") }}{% endif %}
   {% endcall %}
 {% endblock %}

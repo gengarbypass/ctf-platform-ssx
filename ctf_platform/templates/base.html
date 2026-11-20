@@ -36,6 +36,9 @@
             {% if endpoint == 'manage.contests' and g.managed and managed_mode != 'puzzle' %}
               {% set challenges_path = '/manage/challenges/' ~ managed_mode %}
               <a href="{{ url_for('manage.challenges', kind=managed_mode) }}"{% if request.path.startswith(challenges_path) or request.path.startswith('/manage/patches') %} aria-current="page"{% endif %}>{{ ui.icon('list') }}题目管理</a>
+              {% if managed_mode == 'round' %}
+                <a href="{{ url_for('manage.contest_puzzles', contest_id=g.managed.id) }}"{% if request.path == '/manage/contests/' ~ g.managed.id ~ '/puzzles' %} aria-current="page"{% endif %}>{{ ui.icon('shield') }}AWDP 靶机</a>
+              {% endif %}
             {% endif %}
           {% endfor %}
         {% else %}

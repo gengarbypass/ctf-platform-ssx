@@ -13,9 +13,9 @@ from .domain import (
 )
 from .range import RangeError, start_environment, stop_environment
 from .queries import (
-    breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
-    patch_records, puzzle_player_rankings, puzzle_rankings, round_rankings, round_trend, score_records,
-    service_matrix,
+    add_score, breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
+    patch_records, puzzle_player_rankings, puzzle_rankings, round_rankings, round_targets, round_trend,
+    score_records, service_matrix,
 )
 from .storage import read_upload, save_upload, serve_upload
 
@@ -41,7 +41,9 @@ def scope_entry(mode):
 def records_kind(contest):
     expected = {"puzzle": "flag", "round": "patch", "breach": "breach"}[contest["mode"]] if contest else "flag"
     kind = request.args.get("kind", expected)
-    if kind not in {"flag", "patch", "breach"} or (contest and kind != expected):
+    # AWDP 比赛同时存在补丁与靶机 Flag 两类提交
+    allowed = {"patch", "flag"} if contest and contest["mode"] == "round" else {expected} if contest else {"flag", "patch", "breach"}
+    if kind not in allowed:
         abort(404)
     return kind
 
@@ -558,6 +560,7 @@ def awdp():
         data = {
             "matrix": state,
             "tasks": state["tasks"] if state else [],
+            "targets": round_targets(db, contest_id, team_id),
             "events": score_records(db, contest_id, team_id=team_id, limit=10),
             "trend": round_trend(db, contest_id, team_id, g.match["round"]),
             "patches": patch_records(db, contest_id, team_id=team_id, limit=10) if team_id else [],
@@ -593,6 +596,192 @@ def submit_patch(task_id):
             (contest["id"], team["id"], task["id"], g.user["id"], file_id, version, notes, now),
         ).lastrowid
     flash(f"补丁 P-{patch_id:04d} 已进入待评测队列。", "success")
+    return redirect(url_for("site.records", kind="patch"), code=303)
+
+
+def target_record(db, target_id, contest_id):
+    """AWDP 靶机 = 题库中已加入本比赛的 round 类型赛题。"""
+    return db.execute(
+        """SELECT p.* FROM puzzles p JOIN contest_puzzles cp ON cp.puzzle_id = p.id
+           WHERE p.id = ? AND cp.contest_id = ? AND p.kind = 'round' AND p.published = 1""",
+        (target_id, contest_id),
+    ).fetchone()
+
+
+def readable_target(target_id):
+    if not g.contest or g.contest["mode"] != "round" or g.match["status"] == "upcoming":
+        abort(404)
+    task = target_record(get_db(), target_id, g.contest["id"])
+    if task is None:
+        abort(404)
+    return task
+
+
+def target_context(db, target_id):
+    contest, team, now = live_context(db, "round")
+    task = target_record(db, target_id, contest["id"])
+    if task is None:
+        abort(404)
+    return contest, team, task, now
+
+
+@site.get("/awdp/targets/<int:target_id>")
+@login_required
+def round_target(target_id):
+    target = readable_target(target_id)
+    db = get_db()
+    files = db.execute(
+        """SELECT f.id, f.name, length(f.content) AS size FROM puzzle_files a JOIN uploads f ON f.id = a.file_id
+           WHERE a.puzzle_id = ? ORDER BY f.id""", (target_id,),
+    ).fetchall()
+    solves = db.execute(
+        "SELECT COUNT(*) FROM flag_submissions WHERE puzzle_id = ? AND verdict = 'correct'", (target_id,),
+    ).fetchone()[0]
+    history = flag_records(db, g.contest["id"], team_id=g.team["id"], puzzle_id=target_id, limit=20) if g.team else []
+    solved = bool(g.team and db.execute(
+        "SELECT 1 FROM flag_submissions WHERE puzzle_id = ? AND team_id = ? AND verdict = 'correct'",
+        (target_id, g.team["id"]),
+    ).fetchone())
+    environment = rivals = None
+    if target["env_image"]:
+        sweep_environments(db, g.now)
+        if g.team:
+            environment = db.execute(
+                "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
+                (g.contest["id"], g.team["id"], target_id),
+            ).fetchone()
+            # 其他队伍的在线靶机：攻击方据此访问对手容器提取 Flag
+            rivals = db.execute(
+                """SELECT e.host_port, t.name AS team_name FROM breach_environments e
+                   JOIN teams t ON t.id = e.team_id
+                   WHERE e.contest_id = ? AND e.puzzle_id = ? AND e.team_id != ?
+                   AND e.status = 'running' AND (e.expires_at IS NULL OR e.expires_at > ?)
+                   ORDER BY e.host_port""",
+                (g.contest["id"], target_id, g.team["id"], g.now),
+            ).fetchall()
+    notice = session.pop("flag_notice", None)
+    if notice and notice["puzzle_id"] != target_id:
+        notice = None
+    return render_template("target.html", title=target["title"], target=target, files=files, solves=solves,
+                           solved=solved, history=history, notice=notice, environment=environment, rivals=rivals,
+                           environment_host=environment_host() if target["env_image"] else "",
+                           max_upload=current_app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024))
+
+
+@site.post("/awdp/targets/<int:target_id>/flag")
+@login_required
+def submit_target_flag(target_id):
+    value = text_field("flag", "Flag", 256)
+    db = get_db()
+    own_flag = False
+    with transaction(db, write=True):
+        contest, team, target, now = target_context(db, target_id)
+        attempts = db.execute(
+            "SELECT COUNT(*) FROM flag_submissions WHERE contest_id = ? AND team_id = ? AND submitted_at >= ?",
+            (contest["id"], team["id"], now - 60),
+        ).fetchone()[0]
+        if attempts >= 30:
+            abort(429)
+        prior = db.execute(
+            "SELECT 1 FROM flag_submissions WHERE puzzle_id = ? AND team_id = ? AND verdict = 'correct'",
+            (target_id, team["id"]),
+        ).fetchone()
+        digest_match = bool(target["flag_digest"]) and hmac.compare_digest(
+            target["flag_digest"], flag_digest(target["flag_salt"], value))
+        # 动态靶机：比对全部队伍在线环境的派生 Flag，命中他队环境才算攻击成功
+        dynamic_match = False
+        if not digest_match and not target["flag_digest"] and target["env_image"]:
+            for env in db.execute(
+                """SELECT * FROM breach_environments WHERE contest_id = ? AND puzzle_id = ?
+                   AND status = 'running' AND (expires_at IS NULL OR expires_at > ?)""",
+                (contest["id"], target_id, now),
+            ).fetchall():
+                if hmac.compare_digest(env_flag_value(env["secret"], env["id"], target_id), value):
+                    dynamic_match = env["team_id"] != team["id"]
+                    own_flag = env["team_id"] == team["id"]
+                    break
+        if prior:
+            verdict, points = "already_solved", 0
+        elif digest_match or dynamic_match:
+            verdict, points = "correct", target["points"]
+        else:
+            verdict, points = "incorrect", 0
+        db.execute(
+            """INSERT INTO flag_submissions (contest_id, puzzle_id, team_id, user_id, verdict, points, submitted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (contest["id"], target_id, team["id"], g.user["id"], verdict, points, now),
+        )
+        if verdict == "correct":
+            add_score(db, contest_id=contest["id"], team_id=team["id"], kind="attack", delta=target["points"],
+                      round_no=max(1, contest_state(contest, now)["round"]),
+                      reason=f"攻破靶机「{target['title']}」", actor_id=g.user["id"], now=now)
+    notice = {"puzzle_id": target_id, "verdict": verdict, "points": points, "own_flag": own_flag}
+    session["flag_notice"] = notice
+    return redirect(url_for("site.round_target", target_id=target_id), code=303)
+
+
+@site.post("/awdp/targets/<int:target_id>/env/start")
+@login_required
+def start_target_environment(target_id):
+    db = get_db()
+    with transaction(db, write=True):
+        contest, team, target, now = target_context(db, target_id)
+        if not target["env_image"]:
+            abort(404)
+        ensured = ensure_environment_row(db, contest=contest, team=team, puzzle_id=target["id"], now=now)
+        if ensured is None:
+            return redirect(url_for("site.round_target", target_id=target_id), code=303)
+        env_id, secret, port = ensured
+    derived = env_flag_value(secret, env_id, target["id"])
+    flag_env = {"FLAG": derived, f"FLAG_{target['id']}": derived}
+    return launch_environment(db, contest=contest, team=team, env_id=env_id, puzzle_id=target["id"],
+                              image=target["env_image"], container_port=target["env_container_port"],
+                              host_port=port, flag_env=flag_env, now=now,
+                              done_url=url_for("site.round_target", target_id=target_id))
+
+
+@site.post("/awdp/targets/<int:target_id>/env/stop")
+@login_required
+def stop_target_environment(target_id):
+    db = get_db()
+    with transaction(db, write=True):
+        contest, team, target, now = target_context(db, target_id)
+        env = db.execute(
+            "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
+            (contest["id"], team["id"], target["id"]),
+        ).fetchone()
+        if not env:
+            abort(404)
+        db.execute(
+            "UPDATE breach_environments SET status = 'stopped', stopped_at = ? WHERE id = ?", (now, env["id"]),
+        )
+    try:
+        stop_environment(contest["id"], team["id"], target["id"], container_id=env["container_id"])
+    except RangeError:
+        pass
+    return redirect(url_for("site.round_target", target_id=target_id), code=303)
+
+
+@site.post("/awdp/targets/<int:target_id>/fix")
+@login_required
+def submit_target_fix(target_id):
+    if g.contest and g.contest["mode"] != "round":
+        abort(404)
+    if not g.team or not g.match or g.match["status"] != "live":
+        abort(403)
+    version = text_field("version", "修复版本", 40)
+    notes = text_field("notes", "加固说明", 2000, optional=True)
+    upload = read_upload(request.files.get("fix"), "patch", required=True)
+    db = get_db()
+    with transaction(db, write=True):
+        contest, team, target, now = target_context(db, target_id)
+        file_id = save_upload(db, upload, now)
+        patch_id = db.execute(
+            """INSERT INTO patches (contest_id, team_id, target_id, user_id, file_id, version, notes, submitted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (contest["id"], team["id"], target["id"], g.user["id"], file_id, version, notes, now),
+        ).lastrowid
+    flash(f"修复文档 P-{patch_id:04d} 已进入待评测队列。", "success")
     return redirect(url_for("site.records", kind="patch"), code=303)
 
 
@@ -639,7 +828,7 @@ def download(file_id):
     db = get_db()
     admin = g.user["role"] == "admin"
     contest_id = g.contest["id"] if g.contest else None
-    puzzle_open = bool(g.contest and g.contest["mode"] == "puzzle" and g.match["status"] != "upcoming")
+    puzzle_open = bool(g.contest and g.contest["mode"] in ("puzzle", "round") and g.match["status"] != "upcoming")
     patch_team = g.team["id"] if g.team and g.contest["mode"] == "round" else None
     row = db.execute(
         """SELECT f.* FROM uploads f WHERE f.id = ? AND (

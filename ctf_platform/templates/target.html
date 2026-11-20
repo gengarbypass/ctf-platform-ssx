@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui with context %}
+{% block content %}
+  <div class="arena-back">{{ ui.link("返回赛题", url_for('site.awdp', view='tasks'), "link", "back") }}</div>
+  {% call ui.heading(target.title, "AWDP 靶机 · " ~ target.category ~ " · " ~ target.difficulty ~ " · " ~ target.points ~ " 分") %}
+    {{ ui.pill("已攻破" if solved else "未攻破", "success" if solved else "neutral") }}
+  {% endcall %}
+  {% if target.env_image %}
+    {% call ui.panel("靶机环境") %}
+      {% if not g.team %}
+        <div class="arena-detail-copy"><p>加入当前比赛的队伍后即可启动本队的专属靶机。</p></div>
+      {% elif not environment or environment.status == 'stopped' %}
+        <div class="arena-detail-copy"><p>启动后将获得本队专属容器与端口，本队 Flag 由平台生成本队注入容器；攻击其他队伍靶机可获得攻击积分。</p></div>
+        <form class="arena-actions" action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">
+          {{ ui.csrf() }}<button class="arena-btn primary" type="submit">{{ ui.icon('plus') }}{{ '重启靶机' if environment else '启动靶机' }}</button>
+        </form>
+      {% elif environment.status == 'starting' %}
+        <div class="arena-detail-copy"><p>靶机启动中，稍候自动刷新…</p></div>
+        <meta http-equiv="refresh" content="4">
+      {% elif environment.status == 'error' %}
+        <div class="arena-detail-copy"><div class="arena-feedback error" role="status">靶机启动失败：{{ environment.last_error or '未知错误' }}</div></div>
+        <form class="arena-actions" action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">
+          {{ ui.csrf() }}<button class="arena-btn primary" type="submit">重试启动</button>
+        </form>
+      {% else %}
+        <div class="arena-detail-copy">
+          <dl class="arena-detail-data">
+            <div><dt>本队靶机地址</dt><dd><a class="arena-mono" href="http://{{ environment_host }}:{{ environment.host_port }}" target="_blank" rel="noopener">http://{{ environment_host }}:{{ environment.host_port }}</a></dd></div>
+            {% if environment.expires_at %}
+            <div><dt>剩余时间</dt><dd><time class="arena-mono" data-clock-end="{{ environment.expires_at }}" data-server-now="{{ g.now }}">{{ countdown(environment.expires_at - g.now) }}</time></dd></div>
+            {% endif %}
+            <div><dt>状态</dt><dd>{{ ui.pill(env_statuses[environment.status], 'success') }}</dd></div>
+          </dl>
+          <p>本队 Flag 只对本队环境有效；重启靶机后地址与 Flag 保持不变。</p>
+        </div>
+        <div class="arena-actions">
+          <form action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">重启靶机</button></form>
+          <form action="{{ url_for('site.stop_target_environment', target_id=target.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">停止靶机</button></form>
+        </div>
+      {% endif %}
+      {% if rivals %}
+        <section class="arena-attachments" aria-label="其他队伍靶机"><h3>其他队伍在线靶机</h3>
+          <p class="arena-muted">攻击对手靶机提取其 Flag 并提交即可获得攻击积分；请勿破坏对手环境以外的平台服务。</p>
+          <div class="arena-table-wrap"><table class="arena-table"><caption>在线对手</caption>
+            <thead><tr><th scope="col">队伍</th><th scope="col">靶机地址</th></tr></thead>
+            <tbody>{% for rival in rivals %}<tr>
+              <td><strong>{{ rival.team_name }}</strong></td>
+              <td><a class="arena-mono" href="http://{{ environment_host }}:{{ rival.host_port }}" target="_blank" rel="noopener">http://{{ environment_host }}:{{ rival.host_port }}</a></td>
+            </tr>{% endfor %}</tbody>
+          </table></div>
+        </section>
+      {% endif %}
+    {% endcall %}
+  {% endif %}
+  <div class="arena-two arena-split">
+    {% call ui.panel("靶机详情") %}
+      <div class="arena-detail-copy">
+        <p class="arena-pre">{{ target.description }}</p>
+        <dl class="arena-detail-data"><div><dt>分类</dt><dd>{{ target.category }}</dd></div><div><dt>难度</dt><dd>{{ target.difficulty }}</dd></div><div><dt>攻破队伍</dt><dd>{{ solves }} 队</dd></div></dl>
+        {% if files %}
+        <section class="arena-attachments" aria-label="靶机附件"><h3>附件</h3>
+          {% for file in files %}<div class="arena-attachment"><span class="arena-attachment-name">{{ ui.icon('file') }}<span class="arena-mono">{{ file.name }}</span></span>{{ ui.link("下载附件", url_for('site.download', file_id=file.id), "", "down") }}</div>{% endfor %}
+        </section>
+        {% endif %}
+      </div>
+    {% endcall %}
+    {% call ui.panel("提交 Flag") %}
+      {% if solved %}<div class="arena-detail-copy"><p>本队已攻破该靶机。</p></div>
+      {% elif g.match.status != 'live' %}<div class="arena-detail-copy"><p>当前不在比赛提交时间内。</p></div>
+      {% elif not g.team %}<div class="arena-detail-copy"><p>加入当前比赛的队伍后即可提交。</p></div>
+      {% else %}
+      <form class="arena-form" action="{{ url_for('site.submit_target_flag', target_id=target.id) }}" method="post">
+        {{ ui.csrf() }}<label class="arena-field">Flag<input class="arena-input arena-mono" name="flag" type="text" placeholder="flag{…}" maxlength="256" spellcheck="false" autocomplete="off" required></label>
+        <div class="arena-actions"><button class="arena-btn primary" type="submit">提交 Flag</button></div>
+        <small class="arena-muted">提交其他队伍靶机中提取的 Flag 可获得攻击积分；每队每靶机仅计一次。</small>
+      </form>
+      {% endif %}
+    {% endcall %}
+  </div>
+  {% call ui.panel("提交修复文档") %}
+    {% if g.team and g.match.status == 'live' %}
+    <form class="arena-form" action="{{ url_for('site.submit_target_fix', target_id=target.id) }}" method="post" enctype="multipart/form-data">
+      {{ ui.csrf() }}
+      {{ ui.field("修复版本", "version", max=40, placeholder="例如 v1.2.1") }}
+      <label class="arena-field">修复文档<input class="arena-input" name="fix" type="file" accept=".zip,application/zip" required><small>ZIP 文件，说明本队对该靶机的加固与修复措施；上传请求上限 {{ max_upload }} MiB。</small></label>
+      {{ ui.description("加固说明","notes",rows=3) }}
+      <div class="arena-actions"><button class="arena-btn primary" type="submit">提交评测</button></div>
+      <small class="arena-muted">修复文档由赛事人员评审，通过后按评定积分计入加固得分。</small>
+    </form>
+    {% else %}<div class="arena-detail-copy"><p>{{ "当前不在比赛提交时间内。" if g.match.status != 'live' else "加入当前比赛的队伍后即可提交。" }}</p></div>{% endif %}
+  {% endcall %}
+  {% call ui.panel("本队提交记录") %}{{ ui.flag_table(history, false, false) }}{% endcall %}
+  {% if notice %}
+    {% set correct = notice.verdict == 'correct' %}
+    {% set label = "Flag 正确" if correct else "Flag 错误" if notice.verdict == 'incorrect' else "该靶机已被本队攻破" %}
+    {% set message = "本队获得 " ~ notice.points ~ " 攻击积分，积分已更新。" if correct else "不能提交本队靶机的 Flag，请攻击其他队伍的靶机。" if notice.own_flag else "答案未通过判定，请核对后重试。" if notice.verdict == 'incorrect' else "本队已经获得该靶机的攻击积分。" %}
+    <dialog class="arena-dialog" data-auto-dialog aria-labelledby="flag-result-title">
+      <header class="arena-dialog-head"><div><h2 id="flag-result-title">{{ label }}</h2><p>{{ target.title }}</p></div><form method="dialog"><button class="arena-btn" type="submit" aria-label="关闭弹窗">×</button></form></header>
+      <div class="arena-dialog-body"><div class="arena-feedback arena-outcome {{ 'success' if correct else 'error' if notice.verdict == 'incorrect' else '' }}" role="status">{{ message }}</div>
+        <form class="arena-actions" method="dialog">
+          {% if correct %}{{ ui.link("查看排行榜", url_for('site.ranking'), "primary", "next") }}{% endif %}
+          <button type="submit" class="arena-btn {{ '' if correct else 'primary' }}" data-focus-flag>{{ "返回靶机" if correct else "重试" }}</button>
+        </form>
+      </div>
+    </dialog>
+    <noscript><div class="arena-feedback {{ 'success' if correct else 'error' }}">{{ label }}。{{ message }}</div></noscript>
+  {% endif %}
+{% endblock %}

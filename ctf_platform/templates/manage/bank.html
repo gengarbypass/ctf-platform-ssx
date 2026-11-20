@@ -1,15 +1,22 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {% call ui.heading("题库", "赛题独立于比赛维护，可复用于任意解题赛；填写环境镜像的赛题支持动态容器。") %}
+  {% call ui.heading("题库", "赛题与靶机独立于比赛维护，可复用于任意同类比赛；填写环境镜像后支持每队动态容器。") %}
     {{ ui.link("创建赛题", url_for('manage.bank_edit'), "primary", "plus") }}
+    {{ ui.link("创建AWDP靶机", url_for('manage.bank_edit', kind='round'), "", "shield") }}
   {% endcall %}
-  {% call ui.panel("全部赛题") %}
+  <nav class="arena-tabs" aria-label="题库筛选">
+    {% for key, label in [('全部', ''), ('解题赛题', 'puzzle'), ('AWDP 靶机', 'round')] %}
+      <a href="{{ url_for('manage.bank', kind=label) if label else url_for('manage.bank') }}"{% if kind == label %} aria-current="page"{% endif %}>{{ key }}</a>
+    {% endfor %}
+  </nav>
+  {% call ui.panel("全部题目") %}
     {% if rows %}
-    <div class="arena-table-wrap"><table class="arena-table"><caption>赛题列表</caption>
-      <thead><tr><th scope="col">题目</th><th scope="col">分类</th><th scope="col">分值</th><th scope="col">环境</th><th scope="col">所属比赛</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+    <div class="arena-table-wrap"><table class="arena-table"><caption>题目列表</caption>
+      <thead><tr><th scope="col">题目</th><th scope="col">类型</th><th scope="col">分类</th><th scope="col">分值</th><th scope="col">环境</th><th scope="col">所属比赛</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
       <tbody>{% for row in rows %}<tr>
         <td><strong>{{ row.title }}</strong></td>
+        <td>{{ ui.pill("AWDP 靶机", "warning") if row.kind == 'round' else ui.pill("解题赛题", "neutral") }}</td>
         <td>{{ row.category }}</td>
         <td>{{ row.points }}</td>
         <td>{{ ui.pill("动态容器", "success") if row.has_env else ui.pill("静态 Flag", "neutral") }}</td>
@@ -21,6 +28,6 @@
         </div></td>
       </tr>{% endfor %}</tbody>
     </table></div>
-    {% else %}{{ ui.empty("题库为空，点击「创建赛题」开始出题。") }}{% endif %}
+    {% else %}{{ ui.empty("题库为空，点击「创建赛题」或「创建AWDP靶机」开始出题。") }}{% endif %}
   {% endcall %}
 {% endblock %}

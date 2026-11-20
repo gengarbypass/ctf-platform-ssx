@@ -5,6 +5,7 @@
   {% call ui.heading("题目管理", g.managed.title ~ " · " ~ contest_modes[kind] if g.managed else "创建比赛后即可配置题库。") %}
     {% if g.managed %}
       {% if not g.managed.active %}{{ ui.pill("未开启 · 筹备中", "neutral") }}{% endif %}
+      {% if kind == 'round' %}{{ ui.link("AWDP 靶机", url_for('manage.contest_puzzles', contest_id=g.managed.id), "", "shield") }}{% endif %}
       {{ ui.link("创建" ~ unit, url_for('manage.challenge_edit',kind=kind), "primary", "plus") }}
     {% else %}
       {{ ui.link("创建比赛", url_for('manage.contest_edit'), "primary", "plus") }}

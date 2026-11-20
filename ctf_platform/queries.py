@@ -126,11 +126,31 @@ def flag_records(db, contest_id, *, team_id=None, puzzle_id=None, accepted=False
 
 def patch_records(db, contest_id, *, team_id=None, limit=50, offset=0):
     return db.execute(
-        """SELECT p.*, r.title, t.name AS team_name, COALESCE(u.display_name, '已删除账号') AS display_name, f.name AS file_name
-           FROM patches p JOIN round_tasks r ON r.id = p.task_id JOIN teams t ON t.id = p.team_id
+        """SELECT p.*, COALESCE(r.title, z.title) AS title, t.name AS team_name,
+                  COALESCE(u.display_name, '已删除账号') AS display_name, f.name AS file_name
+           FROM patches p
+           LEFT JOIN round_tasks r ON r.id = p.task_id
+           LEFT JOIN puzzles z ON z.id = p.target_id
+           JOIN teams t ON t.id = p.team_id
            LEFT JOIN users u ON u.id = p.user_id JOIN uploads f ON f.id = p.file_id
            WHERE p.contest_id = ? AND (? IS NULL OR p.team_id = ?) ORDER BY p.id DESC LIMIT ? OFFSET ?""",
         (contest_id, team_id, team_id, limit, offset),
+    ).fetchall()
+
+
+def round_targets(db, contest_id, team_id=None):
+    """AWDP 比赛已加入并发布的靶机：附解出队伍数与本队是否已攻破。"""
+    return db.execute(
+        """SELECT p.id, p.title, p.points, (p.env_image IS NOT NULL) AS has_env,
+                  EXISTS(SELECT 1 FROM puzzle_files a WHERE a.puzzle_id = p.id) AS attached,
+                  COUNT(f.id) AS solves,
+                  MAX(CASE WHEN f.team_id = ? THEN 1 ELSE 0 END) AS solved
+           FROM contest_puzzles cp
+           JOIN puzzles p ON p.id = cp.puzzle_id AND p.kind = 'round'
+           LEFT JOIN flag_submissions f ON f.puzzle_id = p.id AND f.verdict = 'correct' AND f.contest_id = ?
+           WHERE cp.contest_id = ? AND p.published = 1
+           GROUP BY p.id ORDER BY p.points DESC, p.id""",
+        (team_id, contest_id, contest_id),
     ).fetchall()
 
 

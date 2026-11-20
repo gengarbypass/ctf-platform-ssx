@@ -80,6 +80,7 @@ CREATE INDEX IF NOT EXISTS memberships_team ON memberships(team_id);
 
 CREATE TABLE IF NOT EXISTS puzzles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL DEFAULT 'puzzle' CHECK (kind IN ('puzzle', 'round')),
     title TEXT NOT NULL,
     category TEXT NOT NULL,
     difficulty TEXT NOT NULL,
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS puzzles (
     env_container_port INTEGER CHECK (env_container_port IS NULL OR env_container_port BETWEEN 1 AND 65535)
 );
 CREATE INDEX IF NOT EXISTS puzzle_listing ON puzzles(published, category);
+CREATE INDEX IF NOT EXISTS puzzle_kind ON puzzles(kind);
 
 CREATE TABLE IF NOT EXISTS contest_puzzles (
     contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
@@ -202,7 +204,8 @@ CREATE TABLE IF NOT EXISTS patches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contest_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
-    task_id INTEGER NOT NULL,
+    task_id INTEGER,
+    target_id INTEGER REFERENCES puzzles(id) ON DELETE CASCADE,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     file_id INTEGER NOT NULL UNIQUE REFERENCES uploads(id),
     version TEXT NOT NULL,
@@ -213,6 +216,7 @@ CREATE TABLE IF NOT EXISTS patches (
     submitted_at INTEGER NOT NULL,
     reviewed_at INTEGER,
     reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    CHECK ((task_id IS NULL) != (target_id IS NULL)),
     FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
     FOREIGN KEY (contest_id, task_id) REFERENCES round_tasks(contest_id, id) ON DELETE CASCADE,
     UNIQUE (contest_id, id)

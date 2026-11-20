@@ -144,6 +144,22 @@ class PlatformTest(unittest.TestCase):
                   baseline="v1.0", description="记录服务状态与加固说明。", published="1")
         return self.lookup("SELECT id FROM round_tasks WHERE contest_id = ?", (contest_id,))[0][0]
 
+    def awdp_target(self, contest_id, *, title="镜像靶场", points=200, env_image=None, flag=None, attachment=False):
+        data = {"title": title, "category": "Web", "difficulty": "进阶", "points": points,
+                "description": "AWDP 攻防靶机", "kind": "round", "published": "1", "join_contest": contest_id}
+        if env_image:
+            data["env_image"] = env_image
+            data["env_container_port"] = "80"
+        if flag:
+            data["flag"] = flag
+        if attachment:
+            data["attachments"] = (io.BytesIO(b"Target sample"), "target.txt")
+        self.post(self.admin, "/manage/bank/new", **data)
+        return self.lookup(
+            "SELECT cp.puzzle_id FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id "
+            "WHERE cp.contest_id = ? AND p.kind = 'round' AND p.title = ? ORDER BY cp.puzzle_id DESC", (contest_id, title),
+        )[0][0]
+
     def breach_flag(self, contest_id, title, layer, flag, *, points=100, description="", published="1"):
         data = {"contest_id": contest_id, "title": title, "layer": layer, "points": points,
                 "flag": flag, "description": description, "published": published}
@@ -496,6 +512,122 @@ class PlatformTest(unittest.TestCase):
         # 表单中存在检测按钮与状态区
         self.assertIn("检测连通性", self.admin.get("/manage/bank/new").get_data(as_text=True))
 
+    def test_awdp_target_attack_and_defense(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest("蓝域杯 · AWDP 攻防赛", mode="round")
+        player, team_a = self.player(contest_id, "bluefox", "BlueFox")
+        other, team_b = self.player(contest_id, "packetlab", "PacketLab")
+        task_id = self.round_task(contest_id)
+        target_id = self.awdp_target(contest_id, env_image="nginx:alpine", points=200, attachment=True)
+        static_id = self.awdp_target(contest_id, title="静态靶机", points=120, flag="flag{static_target}")
+
+        # 题库类型区分与筛选
+        self.assertIn("环境镜像", self.admin.get("/manage/bank/new?kind=round").get_data(as_text=True))
+        self.assertIn("镜像靶场", self.admin.get("/manage/bank?kind=round").get_data(as_text=True))
+        self.assertNotIn("镜像靶场", self.admin.get("/manage/bank?kind=puzzle").get_data(as_text=True))
+        self.assertIn("AWDP 靶机", self.admin.get("/manage/challenges/round").get_data(as_text=True))
+        targets_page = self.admin.get(f"/manage/contests/{contest_id}/puzzles").get_data(as_text=True)
+        self.assertIn("比赛靶机", targets_page)
+        self.assertIn("镜像靶场", targets_page)
+
+        # AWDP 靶机面板与详情入口
+        arena = player.get("/awdp?view=tasks").get_data(as_text=True)
+        self.assertIn("镜像靶场", arena)
+        self.assertIn("进入靶机", arena)
+        self.assertIn("档案检索", arena)
+
+        # 双方各自启动靶机容器，端口依次分配
+        self.post(player, f"/awdp/targets/{target_id}/env/start")
+        env_a = self.lookup("SELECT * FROM breach_environments WHERE puzzle_id = ?", (target_id,))[0]
+        self.assertEqual((env_a["status"], env_a["host_port"]), ("running", 8400))
+        run = fake.state["runs"][0]
+        self.assertEqual((run["image"], run["ports"]), ("nginx:alpine", {"80/tcp": 8400}))
+        flag_a = env_flag_value(env_a["secret"], env_a["id"], target_id)
+        self.assertEqual(run["environment"]["FLAG"], flag_a)
+        self.post(other, f"/awdp/targets/{target_id}/env/start")
+        env_b = self.lookup(
+            "SELECT * FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (target_id, team_b))[0]
+        self.assertEqual(env_b["host_port"], 8401)
+        flag_b = env_flag_value(env_b["secret"], env_b["id"], target_id)
+
+        # 详情页展示双方在线靶机地址与修复文档入口
+        detail = player.get(f"/awdp/targets/{target_id}").get_data(as_text=True)
+        self.assertIn(":8400</a>", detail)
+        self.assertIn(":8401</a>", detail)
+        self.assertIn("提交修复文档", detail)
+
+        # B 提交本队 flag → 判错误；无效 flag → 判错误
+        own = self.post(other, f"/awdp/targets/{target_id}/flag", flag=flag_b, follow=True, code=200)
+        self.assertIn("Flag 错误", own.get_data(as_text=True))
+        self.assertIn("本队靶机", own.get_data(as_text=True))
+        self.post(other, f"/awdp/targets/{target_id}/flag", flag="flag{nope}", follow=True, code=200)
+        # B 攻破 A 队靶机 → 攻击得分
+        hit = self.post(other, f"/awdp/targets/{target_id}/flag", flag=flag_a, follow=True, code=200)
+        self.assertIn("Flag 正确", hit.get_data(as_text=True))
+        self.assertIn("200 攻击积分", hit.get_data(as_text=True))
+        # 重复提交（含队友）不重复计分
+        repeat = self.post(other, f"/awdp/targets/{target_id}/flag", flag=flag_a, follow=True, code=200)
+        self.assertIn("已攻破", repeat.get_data(as_text=True))
+        verdicts = [tuple(r) for r in self.lookup(
+            "SELECT verdict, points FROM flag_submissions WHERE puzzle_id = ? AND team_id = ? ORDER BY id",
+            (target_id, team_b))]
+        self.assertEqual(verdicts, [("incorrect", 0), ("incorrect", 0), ("correct", 200), ("already_solved", 0)])
+        # 攻击得分进入回合积分流水
+        self.assertEqual([tuple(r) for r in self.lookup("SELECT kind, delta, round_no FROM score_events ORDER BY id")],
+                         [("attack", 200, 1)])
+        # 静态靶机自行解题同样计攻击分
+        self.post(other, f"/awdp/targets/{static_id}/flag", flag="flag{static_target}", follow=True, code=200)
+        self.assertEqual([tuple(r) for r in self.lookup("SELECT kind, delta, round_no FROM score_events ORDER BY id")],
+                         [("attack", 200, 1), ("attack", 120, 1)])
+
+        # 修复文档：ZIP 校验、队伍隔离下载、评审发放加固分
+        self.post(other, f"/awdp/targets/{target_id}/fix", version="v1.1",
+                  fix=(io.BytesIO(b"not a zip"), "fix.zip"), code=400)
+        self.post(other, f"/awdp/targets/{target_id}/fix", version="v1.1", notes="修复说明", fix=(patch_zip(), "fix.zip"))
+        fix = self.lookup("SELECT * FROM patches WHERE target_id IS NOT NULL")[0]
+        self.assertIsNone(fix["task_id"])
+        download = f"/downloads/{fix['file_id']}"
+        self.assertEqual(other.get(download).status_code, 200)
+        self.assertEqual(player.get(download).status_code, 404)
+        self.assertEqual(self.admin.get(download).status_code, 200)
+        review = f"/manage/patches/{fix['id']}"
+        self.assertIn("镜像靶场", self.admin.get(review).get_data(as_text=True))
+        self.post(self.admin, review, contest_id=contest_id, status="passed", award=80, review_notes="加固到位")
+        self.assertEqual([tuple(r) for r in self.lookup("SELECT kind, delta, round_no FROM score_events ORDER BY id")],
+                         [("attack", 200, 1), ("attack", 120, 1), ("defense", 80, 1)])
+        board = other.get("/api/scoreboard/round").json["content"]
+        self.assertIn('data-sb-value="400"', board)
+
+        # 记录页双类型切换与靶机附件下载
+        flag_records_page = other.get("/submissions?kind=flag").get_data(as_text=True)
+        self.assertIn("镜像靶场", flag_records_page)
+        patch_records_page = other.get("/submissions").get_data(as_text=True)
+        self.assertIn("补丁与修复文档", patch_records_page)
+        self.assertIn("镜像靶场", patch_records_page)
+        self.assertIn("P-0001", patch_records_page)
+        attachment_id = self.lookup("SELECT id FROM uploads WHERE name = 'target.txt'")[0][0]
+        self.assertEqual(player.get(f"/downloads/{attachment_id}").status_code, 200)
+
+        # 停止靶机后地址不再展示
+        self.post(player, f"/awdp/targets/{target_id}/env/stop")
+        self.assertEqual(self.lookup(
+            "SELECT status FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (target_id, team_a))[0][0],
+            "stopped")
+        self.assertNotIn(":8400</a>", player.get(f"/awdp/targets/{target_id}").get_data(as_text=True))
+
+        # 类型不可混入：解题赛题不能加入 AWDP 比赛，靶机不能加入解题赛
+        self.post(self.admin, "/manage/bank/new", join_contest=contest_id, title="混入挑战",
+                  category="Web", difficulty="入门", points=100, description="x", flag="flag{x}", published="1", code=400)
+        other_contest = self.contest("蓝域杯 · 解题对照赛", mode="puzzle")
+        self.post(self.admin, "/manage/bank/new", join_contest=other_contest, kind="round", title="反向混入",
+                  category="Web", difficulty="入门", points=100, description="x", published="1", code=400)
+        self.assertEqual(self.lookup("SELECT COUNT(*) FROM contest_puzzles WHERE puzzle_id IN "
+                                     "(SELECT id FROM puzzles WHERE kind = 'puzzle') AND contest_id = ?",
+                                     (contest_id,))[0][0], 0)
+        # 切换到解题赛后，靶机页面不可访问
+        self.assertEqual(other.get(f"/awdp/targets/{target_id}").status_code, 404)
+
     def test_contest_cover_upload_crops_to_selection(self):
         def png_stream():
             buffer = io.BytesIO()
@@ -746,7 +878,9 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(player.get(f"/challenges/{puzzle_id}").status_code, 404)
         self.assertEqual(player.get(download).status_code, 404)
         self.assertEqual(player.get("/rankings?kind=puzzle").status_code, 404)
-        self.assertEqual(player.get("/submissions?kind=flag").status_code, 404)
+        # AWDP 比赛的提交记录同时涵盖补丁与靶机 Flag
+        self.assertEqual(player.get("/submissions?kind=flag").status_code, 200)
+        self.assertEqual(player.get("/submissions?kind=breach").status_code, 404)
         client = self.app.test_client()
         client.get("/login")
         response = self.post(client, "/login", code=302, username="bluefox", password=self.password)
@@ -787,7 +921,7 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 8)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 9)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(self.lookup("SELECT contest_id FROM contest_puzzles")[0][0], mixed)

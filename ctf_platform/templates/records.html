@@ -3,7 +3,14 @@
 {% block content %}
   {{ ui.heading(title, g.managed.title if admin and g.managed else g.team.name if g.team else '') }}
   {% set endpoint = 'manage.submissions' if admin else 'site.records' %}
-  {% call ui.panel("补丁提交" if kind == 'patch' else "Flag 提交") %}
+  {% set round_kinds = g.contest and g.contest.mode == 'round' %}
+  {% if round_kinds %}
+  <nav class="arena-tabs" aria-label="记录类型">
+    <a href="{{ url_for(endpoint, kind='patch') }}"{% if kind == 'patch' %} aria-current="page"{% endif %}>补丁与修复文档</a>
+    <a href="{{ url_for(endpoint, kind='flag') }}"{% if kind == 'flag' %} aria-current="page"{% endif %}>靶机 Flag</a>
+  </nav>
+  {% endif %}
+  {% call ui.panel("补丁 / 修复文档" if kind == 'patch' and round_kinds else "补丁提交" if kind == 'patch' else "Flag 提交") %}
     {% if kind == 'patch' %}{{ ui.patch_table(rows, admin) }}{% else %}{{ ui.flag_table(rows, admin) }}{% endif %}
   {% endcall %}
   {% if page > 1 or more %}

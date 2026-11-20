@@ -674,6 +674,9 @@ def challenges(kind):
 @manage.get("/bank")
 @admin_required
 def bank():
+    kind = request.args.get("kind", "")
+    if kind and kind not in ("puzzle", "round"):
+        abort(404)
     rows = get_db().execute(
         """SELECT p.*, (p.env_image IS NOT NULL) AS has_env,
                   GROUP_CONCAT(c.title, '、') AS contests
@@ -682,7 +685,9 @@ def bank():
            LEFT JOIN contests c ON c.id = cp.contest_id
            GROUP BY p.id ORDER BY p.id DESC""",
     ).fetchall()
-    return render_template("manage/bank.html", title="题库", rows=rows)
+    if kind:
+        rows = [row for row in rows if row["kind"] == kind]
+    return render_template("manage/bank.html", title="题库", rows=rows, kind=kind)
 
 
 @manage.get("/contests/<int:contest_id>/puzzles")
@@ -690,22 +695,24 @@ def bank():
 def contest_puzzles(contest_id):
     db = get_db()
     contest = db.execute("SELECT * FROM contests WHERE id = ?", (contest_id,)).fetchone()
-    if not contest or contest["mode"] != "puzzle":
+    if not contest or contest["mode"] not in ("puzzle", "round"):
         abort(404)
+    kind = contest["mode"]
+    unit = "靶机" if kind == "round" else "赛题"
     rows = db.execute(
         """SELECT p.id, p.title, p.category, p.points, p.published, (p.env_image IS NOT NULL) AS has_env
            FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
-           WHERE cp.contest_id = ? ORDER BY p.id""",
-        (contest_id,),
+           WHERE cp.contest_id = ? AND p.kind = ? ORDER BY p.id""",
+        (contest_id, kind),
     ).fetchall()
     available = db.execute(
         """SELECT p.id, p.title, p.category, p.points FROM puzzles p
-           WHERE p.id NOT IN (SELECT puzzle_id FROM contest_puzzles WHERE contest_id = ?)
+           WHERE p.kind = ? AND p.id NOT IN (SELECT puzzle_id FROM contest_puzzles WHERE contest_id = ?)
            ORDER BY p.id DESC""",
-        (contest_id,),
+        (kind, contest_id),
     ).fetchall()
-    return render_template("manage/contest_puzzles.html", title="比赛赛题", contest=contest,
-                           rows=rows, available=available)
+    return render_template("manage/contest_puzzles.html", title=f"比赛{unit}", contest=contest,
+                           rows=rows, available=available, unit=unit)
 
 
 @manage.post("/contests/<int:contest_id>/puzzles/add")
@@ -714,9 +721,13 @@ def contest_puzzle_add(contest_id):
     puzzle_id = integer_field("puzzle_id", "赛题", 1, 2**63 - 1)
     db = get_db()
     with transaction(db, write=True):
-        if not db.execute("SELECT 1 FROM contests WHERE id = ?", (contest_id,)).fetchone():
+        contest_row = db.execute("SELECT mode FROM contests WHERE id = ?", (contest_id,)).fetchone()
+        if not contest_row:
             abort(404)
-        if not db.execute("SELECT 1 FROM puzzles WHERE id = ?", (puzzle_id,)).fetchone():
+        # 只允许同类型：解题赛题入解题赛，AWDP 靶机入 AWDP 比赛
+        if not db.execute(
+            "SELECT 1 FROM puzzles WHERE id = ? AND kind = ?", (puzzle_id, contest_row["mode"]),
+        ).fetchone():
             abort(404)
         db.execute(
             "INSERT OR IGNORE INTO contest_puzzles (contest_id, puzzle_id, added_at) VALUES (?, ?, ?)",
@@ -763,6 +774,11 @@ def bank_edit(task_id):
     task = db.execute("SELECT * FROM puzzles WHERE id = ?", (task_id,)).fetchone() if task_id is not None else None
     if task_id is not None and not task:
         abort(404)
+    # 解题赛题与 AWDP 靶机共用同一套题库表单与校验策略；编辑时沿用题目自身类型
+    kind = task["kind"] if task else request.form.get("kind", request.args.get("kind", "puzzle"))
+    if kind not in ("puzzle", "round"):
+        abort(404)
+    unit = "靶机" if kind == "round" else "赛题"
     raw_join = request.form.get("join_contest", request.args.get("contest", "")).strip()
     join_contest = int(raw_join) if raw_join.isdecimal() else None
     if request.method == "GET":
@@ -770,8 +786,8 @@ def bank_edit(task_id):
             """SELECT f.id, f.name FROM puzzle_files a JOIN uploads f ON f.id = a.file_id WHERE a.puzzle_id = ?""",
             (task_id,),
         ).fetchall() if task else []
-        return render_template("manage/challenge_form.html", title="编辑赛题" if task else "创建赛题", task=task,
-                               kind="puzzle", files=files, categories=CATEGORIES, difficulties=DIFFICULTIES,
+        return render_template("manage/challenge_form.html", title=f"编辑{unit}" if task else f"创建{unit}", task=task,
+                               kind=kind, bank=True, files=files, categories=CATEGORIES, difficulties=DIFFICULTIES,
                                join_contest=join_contest, subtitle="题库")
     title = text_field("title", "题目名称", 100)
     description = text_field("description", "题目说明", 16000)
@@ -794,8 +810,12 @@ def bank_edit(task_id):
     uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
     remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
     with transaction(db, write=True):
-        if join_contest and not db.execute("SELECT 1 FROM contests WHERE id = ?", (join_contest,)).fetchone():
-            raise FormError("要加入的比赛不存在。")
+        if join_contest:
+            contest_row = db.execute("SELECT mode FROM contests WHERE id = ?", (join_contest,)).fetchone()
+            if not contest_row:
+                raise FormError("要加入的比赛不存在。")
+            if contest_row["mode"] != kind:
+                raise FormError(f"该比赛不是{'AWDP' if kind == 'round' else '解题赛'}比赛，无法加入此{unit}。")
         if task:
             if salt_and_digest:
                 db.execute("UPDATE puzzles SET flag_salt = ?, flag_digest = ? WHERE id = ?", (*salt_and_digest, task_id))
@@ -806,10 +826,10 @@ def bank_edit(task_id):
             )
         else:
             task_id = db.execute(
-                """INSERT INTO puzzles (title, category, difficulty, description, points, flag_salt, flag_digest,
+                """INSERT INTO puzzles (kind, title, category, difficulty, description, points, flag_salt, flag_digest,
                                         published, env_image, env_container_port)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (title, category, difficulty, description, points, *salt_and_digest, published,
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (kind, title, category, difficulty, description, points, *salt_and_digest, published,
                  env_image, env_container_port),
             ).lastrowid
         if join_contest:
@@ -822,8 +842,8 @@ def bank_edit(task_id):
         for upload in uploads:
             db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
     if join_contest:
-        return saved("赛题已保存并加入比赛。", "manage.contest_puzzles", contest_id=join_contest)
-    return saved("赛题已保存。", "manage.bank")
+        return saved(f"{unit}已保存并加入比赛。", "manage.contest_puzzles", contest_id=join_contest)
+    return saved(f"{unit}已保存。", "manage.bank")
 
 
 @manage.route("/bank/<int:task_id>/delete", methods=["GET", "POST"])
@@ -1029,8 +1049,11 @@ def patch_review(patch_id):
     contest_id = managed_id("round")
     db = get_db()
     patch = db.execute(
-        """SELECT p.*, t.name AS team_name, r.title, f.name AS file_name FROM patches p
-           JOIN teams t ON t.id = p.team_id JOIN round_tasks r ON r.id = p.task_id JOIN uploads f ON f.id = p.file_id
+        """SELECT p.*, t.name AS team_name, COALESCE(r.title, z.title) AS title, f.name AS file_name FROM patches p
+           JOIN teams t ON t.id = p.team_id
+           LEFT JOIN round_tasks r ON r.id = p.task_id
+           LEFT JOIN puzzles z ON z.id = p.target_id
+           JOIN uploads f ON f.id = p.file_id
            WHERE p.contest_id = ? AND p.id = ?""", (contest_id, patch_id),
     ).fetchone()
     if not patch:
