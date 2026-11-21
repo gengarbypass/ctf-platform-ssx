@@ -10,7 +10,7 @@
       {% if not g.team %}
         <div class="arena-detail-copy"><p>各队伍的靶机由平台在开赛后统一开启；加入比赛队伍后此处显示本队靶机地址。</p></div>
       {% elif not environment or environment.status == 'stopped' %}
-        <div class="arena-detail-copy"><p>靶机由平台在开赛后为全部队伍统一开启并持续整个比赛周期；当前未运行时可点击重启，地址与 Flag 保持不变。</p></div>
+        <div class="arena-detail-copy"><p>靶机由平台在开赛后为全部队伍统一开启并持续整个比赛周期；当前未运行时可点击重启，重启将分配全新端口，Flag 保持不变。</p></div>
         <form class="arena-actions" action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">
           {{ ui.csrf() }}<button class="arena-btn primary" type="submit">{{ ui.icon('plus') }}重启靶机</button>
         </form>
@@ -31,7 +31,7 @@
             {% endif %}
             <div><dt>状态</dt><dd>{{ ui.pill(env_statuses[environment.status], 'success') }}</dd></div>
           </dl>
-          <p>所有队伍的靶机由平台在开赛后统一开启，持续至比赛结束；本队 Flag 只对本队环境有效，重启靶机后地址与 Flag 保持不变。</p>
+          <p>所有队伍的靶机由平台在开赛后统一开启，持续至比赛结束；本队 Flag 只对本队环境有效，重启靶机将分配全新端口，Flag 保持不变。</p>
         </div>
         <div class="arena-actions">
           <form action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">重启靶机</button></form>

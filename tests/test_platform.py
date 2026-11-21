@@ -416,11 +416,15 @@ class PlatformTest(unittest.TestCase):
 
         # 并发上限：第三队被拒
         self.post(third, "/breach/env/start", code=400)
-        # 停止后重启：secret 与端口不变，Flag 稳定
+        # 停止后重启：secret（Flag）不变，端口更换且台账保证永不复用历史端口
         self.post(player, "/breach/env/stop")
         self.post(player, "/breach/env/start")
         restarted = self.lookup("SELECT * FROM breach_environments WHERE team_id = ?", (team_id,))[0]
-        self.assertEqual((restarted["secret"], restarted["host_port"]), (env["secret"], 8400))
+        self.assertEqual(restarted["secret"], env["secret"])
+        self.assertEqual(restarted["host_port"], 8402)
+        self.assertEqual([row[0] for row in self.lookup("SELECT port FROM env_ports ORDER BY port")],
+                         [8400, 8401, 8402])
+        self.assertIn(":8402</a>", player.get("/breach").get_data(as_text=True))
         result = self.post(player, "/breach/flag", flag=env_flag_value(env["secret"], env["id"], 2), follow=True, code=200)
         self.assertIn("本队获得 150 分", result.get_data(as_text=True))
         self.assertIn("<strong>250</strong>", player.get("/breach").get_data(as_text=True))
@@ -963,7 +967,7 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 9)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 10)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(self.lookup("SELECT contest_id FROM contest_puzzles")[0][0], mixed)

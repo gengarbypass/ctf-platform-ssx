@@ -176,6 +176,12 @@ CREATE TABLE IF NOT EXISTS breach_environments (
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_env_port ON breach_environments(host_port) WHERE host_port IS NOT NULL;
 
+-- 动态容器端口台账：记录每个曾分配过的端口，重启换新端口且永不与历史端口重复
+CREATE TABLE IF NOT EXISTS env_ports (
+    port INTEGER PRIMARY KEY,
+    allocated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS round_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,

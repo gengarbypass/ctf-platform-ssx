@@ -331,12 +331,13 @@ def autostart_round_targets(app, contest_id):
                                     db.execute("UPDATE breach_environments SET expires_at = ? WHERE id = ?",
                                                (contest["end_at"], env["id"]))
                                 continue
-                            port = env["host_port"] if env and env["host_port"] else allocate_environment_port(db)
+                            # 重启补启同样换新端口（永不复用历史端口）
+                            port = allocate_environment_port(db)
                             if env:
                                 db.execute(
                                     """UPDATE breach_environments SET status = 'starting', last_error = '',
-                                       expires_at = ?, container_id = '', network_id = '' WHERE id = ?""",
-                                    (contest["end_at"], env["id"]),
+                                       host_port = ?, expires_at = ?, container_id = '', network_id = '' WHERE id = ?""",
+                                    (port, contest["end_at"], env["id"]),
                                 )
                                 env_id, secret = env["id"], env["secret"]
                             else:
@@ -409,10 +410,15 @@ def spawn_autostart(app, contest_id):
 
 
 def allocate_environment_port(db):
+    """端口只增不发：每次分配全新端口并计入台账，重启换新端口且永不与历史端口重复。"""
     taken = {row[0] for row in db.execute("SELECT host_port FROM breach_environments WHERE host_port IS NOT NULL")}
-    port = current_app.config["ENV_PORT_START"]
+    highest = db.execute(
+        "SELECT COALESCE(MAX(port), ?) FROM env_ports", (current_app.config["ENV_PORT_START"] - 1,),
+    ).fetchone()[0]
+    port = max(current_app.config["ENV_PORT_START"], highest + 1)
     while port in taken and port < 65535:
         port += 1
+    db.execute("INSERT OR IGNORE INTO env_ports (port, allocated_at) VALUES (?, ?)", (port, int(time.time())))
     return port
 
 
@@ -497,7 +503,8 @@ def ensure_environment_row(db, *, contest, team, puzzle_id, now):
     if not env and live_count >= (contest["env_max"] or 20):
         raise FormError("环境并发已达上限，请稍后重试或联系赛事人员。")
     secret = env["secret"] if env else secrets.token_hex(32)
-    port = env["host_port"] if env and env["host_port"] else allocate_environment_port(db)
+    # 每次重启都分配全新端口（永不复用历史端口）；secret 不变则 Flag 保持稳定
+    port = allocate_environment_port(db)
     expires_at = now + (contest["env_ttl_minutes"] or 120) * 60
     if env:
         db.execute(

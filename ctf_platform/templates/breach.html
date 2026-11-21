@@ -53,7 +53,7 @@
               {% endif %}
               <div><dt>状态</dt><dd>{{ ui.pill(env_statuses[env.status], 'success') }}</dd></div>
             </dl>
-            <p>每枚 Flag 只对本队环境有效；重启环境后地址与 Flag 保持不变。</p>
+            <p>每枚 Flag 只对本队环境有效；重启环境将分配全新端口（地址随之变化），Flag 保持不变。</p>
           </div>
           <div class="arena-actions">
             <form action="{{ url_for('site.start_breach_environment') }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">重启环境</button></form>

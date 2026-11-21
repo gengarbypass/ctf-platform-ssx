@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
     "contest_puzzles", "contest_teams", "breach_flags", "breach_submissions", "breach_environments",
@@ -185,6 +185,17 @@ def prepare_schema(connection):
                 # AWDP 靶机：题库类型列与补丁的靶机归属列（重建按列名回拷，旧表需先补齐同名列）
                 add_column(connection, "puzzles", "kind TEXT NOT NULL DEFAULT 'puzzle'")
                 add_column(connection, "patches", "target_id INTEGER")
+            if 1 <= version <= 9:
+                # 动态容器端口台账：回填存量端口，之后重启换新端口且永不复用
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS env_ports (
+                        port INTEGER PRIMARY KEY,
+                        allocated_at INTEGER NOT NULL)""")
+                env_cols = table_columns(connection, "breach_environments")
+                if env_cols and "host_port" in env_cols:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO env_ports (port, allocated_at) "
+                        "SELECT host_port, strftime('%s', 'now') FROM breach_environments WHERE host_port IS NOT NULL")
             if 1 <= version <= 7:
                 # 队伍全局化：同名队伍合并到最早创建的一支，所有引用重定向；
                 # 随后把旧"比赛私有队伍"登记为参赛关联（重建后 teams 不再带 contest_id）。
