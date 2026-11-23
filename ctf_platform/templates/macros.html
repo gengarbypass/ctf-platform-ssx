@@ -116,7 +116,7 @@
     <div class="arena-table-wrap"><table class="arena-table"><caption>Flag 提交记录</caption>
       <thead><tr>{% if show_title %}<th scope="col">题目</th>{% endif %}{% if admin %}<th scope="col">队伍</th><th scope="col">提交人</th>{% endif %}<th scope="col">提交时间</th><th scope="col">判定</th><th scope="col">积分变化</th></tr></thead>
       <tbody>{% for row in rows %}<tr>
-        {% if show_title %}<td><strong>{{ row.title }}</strong></td>{% endif %}
+        {% if show_title %}<td><strong>{{ row.title }}</strong>{% if 'flag_title' in row.keys() and row.flag_title %}<br><small class="arena-muted">靶点：{{ row.flag_title }}</small>{% endif %}{% if row.victim_name %}<br><small class="arena-muted">攻破队伍：{{ row.victim_name }}</small>{% endif %}</td>{% endif %}
         {% if admin %}<td>{{ row.team_name }}</td><td>{{ row.display_name }}</td>{% endif %}
         <td class="arena-mono arena-nowrap">{{ local_time(row.submitted_at) }}</td><td>{{ verdict(row.verdict) }}</td>
         <td class="arena-score arena-number">{{ signed(row.points) if row.points else '—' }}</td>

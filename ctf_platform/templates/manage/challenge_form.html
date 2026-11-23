@@ -19,6 +19,19 @@
   {{ ui.description("靶点提示（选填）","description",rows=2,max=16000) }}
 </div>
 {%- endmacro %}
+{% macro target_flag_row(index=1, row=None) -%}
+<div class="arena-breach-row">
+  <div class="arena-breach-row-head"><strong data-breach-row-label>靶点 {{ index }}</strong>
+    <button class="arena-btn" type="button" data-breach-remove aria-label="移除此靶点">×</button></div>
+  <input type="hidden" name="flag_id" value="{{ row.id if row else '' }}">
+  <div class="arena-two">
+    {{ ui.field("靶点名称","flag_title",row.title if row else '',max=100,required=false,placeholder="如 拿下管理后台") }}
+    {{ ui.field("分值","flag_points",row.points if row else 100,type='number',min=1,maximum=100000,required=false) }}
+  </div>
+  {{ ui.field("Flag","flag_value",type='password',max=256,required=false,placeholder="留空保留当前 Flag" if row and row.flag_digest else "flag{…}") }}
+  {{ ui.description("靶点提示（选填）","flag_description",row.description if row else '',rows=2,max=16000) }}
+</div>
+{%- endmacro %}
 {% block content %}
   {% set bulk_breach = kind == 'breach' and not task %}
   {% if in_bank %}
@@ -51,6 +64,15 @@
           <span class="arena-muted" data-probe-result role="status">未检测。将启动一次性容器验证镜像可拉取、端口可访问（约需数秒）。</span>
         </div>
         <small class="arena-muted">填写环境镜像后，比赛中每支队伍可启动本题专属容器（自动分配端口，每队每题一个），Flag 按队伍动态生成注入。{% if kind == 'round' %}AWDP 比赛中，提交其他队伍靶机容器里的 Flag 可获得攻击得分。{% endif %}</small>
+        {% if kind == 'round' %}
+        <div class="arena-breach-rows" data-breach-rows data-min-rows="0">
+          <template data-breach-row>{{ target_flag_row() }}</template>
+          {% for row in target_flags %}{{ target_flag_row(loop.index, row) }}{% endfor %}
+          {% if not target_flags %}{{ target_flag_row(1) }}{% endif %}
+        </div>
+        <div class="arena-actions"><button class="arena-btn" type="button" data-breach-add>{{ ui.icon('plus') }}添加靶点</button></div>
+        <small class="arena-muted">靶点选填（镜像里有几个 Flag 就填写几行）：每个靶点各有一枚独立 Flag 与独立分值，按靶点顺序注入容器（FLAG_1、FLAG_2…），选手提交时由平台自动匹配靶点；全部留空即只有靶机级的一枚 Flag（镜像里只读 `FLAG` 时适用）。{% if task and task.env_image %}当前靶机已填写环境镜像，靶点 Flag 须留空，由平台按队伍动态生成。{% endif %}开赛后请勿增删靶点：已在运行的靶机需重启才会按新靶点注入。</small>
+        {% endif %}
       {% elif kind == 'breach' and task %}
         {{ ui.field("所属层级","layer",task.layer,max=40,placeholder="如 边界突破 / 内网横向 / 设备接管") }}
         <div class="arena-two">

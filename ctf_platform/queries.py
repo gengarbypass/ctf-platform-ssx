@@ -1,4 +1,4 @@
-from .domain import SCORE_KINDS
+from .domain import SCORE_KINDS, attack_pill
 
 
 PLAYER_BOARD_LIMIT = 10
@@ -115,9 +115,12 @@ def service_matrix(db, contest_id, *, public=True):
 
 def flag_records(db, contest_id, *, team_id=None, puzzle_id=None, accepted=False, limit=50, offset=0):
     return db.execute(
-        """SELECT f.*, p.title, p.category, t.name AS team_name, COALESCE(u.display_name, '已删除账号') AS display_name
+        """SELECT f.*, p.title, p.category, tf.title AS flag_title, t.name AS team_name, v.name AS victim_name,
+                  COALESCE(u.display_name, '已删除账号') AS display_name
            FROM flag_submissions f JOIN puzzles p ON p.id = f.puzzle_id
-           JOIN teams t ON t.id = f.team_id LEFT JOIN users u ON u.id = f.user_id
+           LEFT JOIN target_flags tf ON tf.id = f.target_flag_id
+           JOIN teams t ON t.id = f.team_id LEFT JOIN teams v ON v.id = f.victim_team_id
+           LEFT JOIN users u ON u.id = f.user_id
            WHERE f.contest_id = ? AND (? IS NULL OR f.team_id = ?) AND (? IS NULL OR f.puzzle_id = ?)
            AND (? = 0 OR f.verdict = 'correct') ORDER BY f.id DESC LIMIT ? OFFSET ?""",
         (contest_id, team_id, team_id, puzzle_id, puzzle_id, accepted, limit, offset),
@@ -138,20 +141,88 @@ def patch_records(db, contest_id, *, team_id=None, limit=50, offset=0):
     ).fetchall()
 
 
-def round_targets(db, contest_id, team_id=None):
-    """AWDP 比赛已加入并发布的靶机：附解出队伍数与本队是否已攻破。"""
+def target_flags(db, puzzle_id):
+    """AWDP 靶机的靶点（按布置顺序）。"""
+    return db.execute("SELECT * FROM target_flags WHERE puzzle_id = ? ORDER BY id", (puzzle_id,)).fetchall()
+
+
+def rival_count(db, contest_id, team_id):
+    """本比赛中除该队以外的队伍数：动态靶机每队各有一个实例，即该队可攻击的对手数。"""
+    if team_id is None:
+        return 0
     return db.execute(
+        """SELECT COUNT(*) FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
+           WHERE ct.contest_id = ? AND ct.team_id IS NOT ?""", (contest_id, team_id),
+    ).fetchone()[0]
+
+
+def target_awards(db, contest_id, puzzle_ids):
+    """AWDP 靶机的攻击命中明细：{靶机ID: {队伍ID: {(靶点ID 或 None, 被攻破队伍ID 或 None)}}}。
+
+    动态靶机各队实例的 Flag 互不相同，同一队攻破几支队伍的靶机，同一靶点就出现几次；
+    静态 Flag 各队靶机相同、无从区分来源，被攻破队伍记为 None。未布置靶点的靶机没有靶点，靶点记为 None。
+    """
+    awards = {puzzle_id: {} for puzzle_id in puzzle_ids}
+    if not puzzle_ids:
+        return awards
+    placeholders = ",".join("?" * len(puzzle_ids))
+    for row in db.execute(
+        f"""SELECT puzzle_id, team_id, target_flag_id, victim_team_id FROM flag_submissions
+            WHERE contest_id = ? AND verdict = 'correct' AND puzzle_id IN ({placeholders})""",
+        (contest_id, *puzzle_ids),
+    ):
+        awards[row["puzzle_id"]].setdefault(row["team_id"], set()).add((row["target_flag_id"], row["victim_team_id"]))
+    return awards
+
+
+def target_breaches(awards, flag_total):
+    """由一台靶机的命中明细得出各队已完全攻破的对手：{队伍ID: 被攻破的队伍ID 集合}。
+
+    靶机的全部靶点（未布置靶点即靶机级 Flag）都已从同一支对手的靶机获取，才算攻破该对手；
+    集合含 None 表示凭静态 Flag 得分（不区分对手）。
+    """
+    breaches = {}
+    for team_id, obtained in awards.items():
+        rivals = {}
+        for flag_id, victim in obtained:
+            rivals.setdefault(victim, set()).add(flag_id)
+        breached = {victim for victim, flags in rivals.items() if len(flags) >= (flag_total or 1)}
+        if breached:
+            breaches[team_id] = breached
+    return breaches
+
+
+def round_targets(db, contest_id, team_id=None):
+    """AWDP 比赛已加入并发布的靶机：附攻破队伍数 solves 与本队进度 state（药丸的色调与文案）。
+
+    布置了靶点的靶机按靶点计：flag_total 为靶点总数，points 取各靶点分值之和；
+    未布置靶点的靶机沿用靶机级 Flag（flag_total 为 0）。solves 为已完全攻破该靶机的队伍数——
+    动态靶机攻破任意一支对手队伍的实例即计入，静态靶机为拿到全部 Flag 的队伍数。
+    """
+    rows = [dict(row) for row in db.execute(
         """SELECT p.id, p.title, p.points, (p.env_image IS NOT NULL) AS has_env,
                   EXISTS(SELECT 1 FROM puzzle_files a WHERE a.puzzle_id = p.id) AS attached,
-                  COUNT(f.id) AS solves,
-                  MAX(CASE WHEN f.team_id = ? THEN 1 ELSE 0 END) AS solved
+                  (SELECT COUNT(*) FROM target_flags tf WHERE tf.puzzle_id = p.id) AS flag_total,
+                  (SELECT COALESCE(SUM(tf.points), 0) FROM target_flags tf WHERE tf.puzzle_id = p.id) AS flag_points
            FROM contest_puzzles cp
            JOIN puzzles p ON p.id = cp.puzzle_id AND p.kind = 'round'
-           LEFT JOIN flag_submissions f ON f.puzzle_id = p.id AND f.verdict = 'correct' AND f.contest_id = ?
            WHERE cp.contest_id = ? AND p.published = 1
-           GROUP BY p.id ORDER BY p.points DESC, p.id""",
-        (team_id, contest_id, contest_id),
-    ).fetchall()
+           ORDER BY p.points DESC, p.id""", (contest_id,),
+    ).fetchall()]
+    awards = target_awards(db, contest_id, [row["id"] for row in rows])
+    rivals = rival_count(db, contest_id, team_id)
+    for row in rows:
+        breaches = target_breaches(awards[row["id"]], row["flag_total"])
+        row["solves"] = len(breaches)
+        if row["flag_total"]:
+            row["points"] = row["flag_points"]
+        row["state"] = attack_pill(
+            # 动态靶机按攻破的对手队伍数计；静态靶机没有对手实例，按 Flag 是否全部拿到计
+            rivals=rivals if row["has_env"] else 0,
+            breached=len(breaches.get(team_id, set()) - {None}),
+            flags=len(awards[row["id"]].get(team_id, set())), need=(row["flag_total"] or 1) * (rivals or 1),
+        )
+    return rows
 
 
 def score_records(db, contest_id, *, team_id=None, round_no=None, limit=50, offset=0):

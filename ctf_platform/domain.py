@@ -132,9 +132,17 @@ def new_flag(value):
     return salt, flag_digest(salt, value)
 
 
-def env_flag_value(secret, env_id, flag_id):
-    """由环境密钥派生某靶点对某队伍的动态 Flag；secret 不变则值稳定，供重启后保持。"""
-    digest = hmac.new(secret.encode("utf-8"), f"env:{env_id}:flag:{flag_id}".encode("utf-8"), "sha256").hexdigest()[:16]
+def flag_matches(expected, value):
+    """恒定时间比较动态环境的 Flag：按 UTF-8 字节比较，提交内容含非 ASCII 字符时同样只判错、不报错。"""
+    return hmac.compare_digest(expected.encode("utf-8"), value.encode("utf-8"))
+
+
+def env_flag_value(secret, env_id, flag_id, *, kind="flag"):
+    """由环境密钥派生某靶点对某队伍的动态 Flag；secret 不变则值稳定，供重启后保持。
+
+    kind 区分派生用途：AWDP 靶机的靶点用 "target"，避免靶点 ID 与靶机 ID 相同时与靶机级 Flag 派生出同一个值。
+    """
+    digest = hmac.new(secret.encode("utf-8"), f"env:{env_id}:{kind}:{flag_id}".encode("utf-8"), "sha256").hexdigest()[:16]
     return f"flag{{e{env_id}-{digest}}}"
 
 
@@ -164,6 +172,31 @@ def countdown(seconds, show_hours=False):
         hours, minute = divmod(minutes, 60)
         return f"{hours:02d}:{minute:02d}:{second:02d}"
     return f"{minutes:02d}:{second:02d}"
+
+
+def attack_pill(*, rivals=0, breached=0, flags=0, need=1):
+    """AWDP 靶机攻击进度的药丸（色调, 文案）。
+
+    rivals 为可攻击的对手队伍数：动态靶机每队各有一个实例，攻破几支队伍就显示几支，全部攻破才算已攻破；
+    rivals 为 0（静态靶机、单台对手靶机）或尚无整台被攻破时，按已获取的 Flag 数 flags 与总数 need 展示。
+    """
+    if rivals:
+        if breached >= rivals:
+            return "success", f"已攻破 {breached}/{rivals} 队"
+        if breached:
+            return "warning", f"已攻破 {breached}/{rivals} 队"
+    elif flags >= need:
+        return "success", "已攻破"
+    if flags:
+        return "warning", f"已获取 {flags}/{need} 枚"
+    return "neutral", "未攻破"
+
+
+def obtained_pill(count, total=0):
+    """单个靶点获取情况的药丸（色调, 文案）；total 为可获取的对手队伍数，0 表示不区分对手。"""
+    if count and count >= total:
+        return "success", "已获取"
+    return ("warning", f"已获取 {count}/{total} 队") if count else ("neutral", "未获取")
 
 
 def round_segments(state):

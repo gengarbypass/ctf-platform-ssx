@@ -69,22 +69,24 @@ if (roundDuration) {
 const breachRows = document.querySelector("[data-breach-rows]");
 if (breachRows) {
   const template = breachRows.querySelector("template[data-breach-row]");
+  // 行数下限：默认至少保留 1 行；容器声明 data-min-rows="0" 时允许删到空（如 AWDP 靶机的靶点）
+  const minimum = Number(breachRows.dataset.minRows ?? 1);
   const rows = () => breachRows.querySelectorAll(".arena-breach-row");
   function renumberBreachRows() {
     rows().forEach((row, index) => {
       row.querySelector("[data-breach-row-label]").textContent = `靶点 ${index + 1}`;
-      row.querySelector("[data-breach-remove]").disabled = rows().length <= 1;
+      row.querySelector("[data-breach-remove]").disabled = rows().length <= minimum;
     });
   }
   document.querySelector("[data-breach-add]")?.addEventListener("click", () => {
     breachRows.appendChild(template.content.cloneNode(true));
     renumberBreachRows();
     const added = rows()[rows().length - 1];
-    added.querySelector("input[name='layer']").focus();
+    (added.querySelector("input[name='layer']") || added.querySelector("input:not([type=hidden])"))?.focus();
   });
   breachRows.addEventListener("click", event => {
     const remove = event.target.closest("[data-breach-remove]");
-    if (remove && !remove.disabled && rows().length > 1) {
+    if (remove && !remove.disabled && rows().length > minimum) {
       remove.closest(".arena-breach-row").remove();
       renumberBreachRows();
     }

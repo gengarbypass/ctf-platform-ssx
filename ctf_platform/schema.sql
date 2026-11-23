@@ -108,11 +108,27 @@ CREATE TABLE IF NOT EXISTS puzzle_files (
     PRIMARY KEY (puzzle_id, file_id)
 );
 
+-- AWDP 靶机的靶点：一台靶机可布置多个靶点，每靶点一枚独立 Flag；flag_digest 为空串表示启动环境时按队伍派生
+CREATE TABLE IF NOT EXISTS target_flags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    puzzle_id INTEGER NOT NULL REFERENCES puzzles(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    points INTEGER NOT NULL CHECK (points > 0),
+    flag_salt TEXT NOT NULL,
+    flag_digest TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS target_flags_listing ON target_flags(puzzle_id, id);
+
 CREATE TABLE IF NOT EXISTS flag_submissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contest_id INTEGER NOT NULL,
     puzzle_id INTEGER NOT NULL,
+    target_flag_id INTEGER REFERENCES target_flags(id) ON DELETE SET NULL,
     team_id INTEGER NOT NULL,
+    -- AWDP 动态靶机：这枚 Flag 取自哪支队伍的靶机（各队实例的 Flag 互不相同，据此按被攻破的队伍计次）；
+    -- 该队伍被删除时连同这些攻击记录一起删除（攻击方已获积分保留在计分流水）
+    victim_team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     verdict TEXT NOT NULL CHECK (verdict IN ('correct', 'incorrect', 'already_solved')),
     points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
@@ -123,6 +139,11 @@ CREATE TABLE IF NOT EXISTS flag_submissions (
 CREATE INDEX IF NOT EXISTS flags_team ON flag_submissions(contest_id, team_id, id DESC);
 CREATE INDEX IF NOT EXISTS flags_team_recent ON flag_submissions(contest_id, team_id, submitted_at);
 CREATE INDEX IF NOT EXISTS flags_contest ON flag_submissions(contest_id, id DESC);
+-- 每队每靶点的攻击分只计一次（数据库层兜底）；动态靶机按被攻破的队伍各计一次，victim_team_id 为空即静态 Flag 或升级前的记录。
+-- 未布置靶点的靶机该列为空，不受此索引约束（靶点被删除后旧记录的该列同样置空，得以保留）
+CREATE UNIQUE INDEX IF NOT EXISTS one_target_flag_award
+    ON flag_submissions(contest_id, target_flag_id, team_id, COALESCE(victim_team_id, 0))
+    WHERE verdict = 'correct' AND target_flag_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS breach_flags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

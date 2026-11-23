@@ -11,14 +11,14 @@ from werkzeug.security import check_password_hash
 
 from .db import connect, get_db, transaction
 from .domain import (
-    CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, FormError, contest_schedule, contest_state, env_flag_value,
-    flag_digest, login_required, local_time, round_segments, text_field,
+    CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, FormError, attack_pill, contest_schedule, contest_state,
+    env_flag_value, flag_digest, flag_matches, login_required, local_time, obtained_pill, round_segments, text_field,
 )
 from .range import RangeError, start_environment, stop_environment
 from .queries import (
     add_score, breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
-    patch_records, puzzle_player_rankings, puzzle_rankings, round_rankings, round_targets, round_trend,
-    score_records, service_matrix, team_list,
+    patch_records, puzzle_player_rankings, puzzle_rankings, rival_count, round_rankings, round_targets, round_trend,
+    score_records, service_matrix, target_awards, target_breaches, target_flags, team_list,
 )
 from .storage import read_upload, save_upload, serve_upload
 
@@ -255,7 +255,7 @@ def submit_flag(puzzle_id):
                    AND status = 'running' AND (expires_at IS NULL OR expires_at > ?)""",
                 (contest["id"], team["id"], puzzle_id, now),
             ).fetchone()
-            dynamic_match = bool(env) and hmac.compare_digest(env_flag_value(env["secret"], env["id"], puzzle_id), value)
+            dynamic_match = bool(env) and flag_matches(env_flag_value(env["secret"], env["id"], puzzle_id), value)
         if prior:
             verdict, points = "already_solved", 0
         elif digest_match or dynamic_match:
@@ -353,11 +353,12 @@ def autostart_round_targets(app, contest_id):
                     pending.append((env_id, secret, port, team, target))
             if not pending:
                 return
+            # 靶点归属须在进入线程池前取出：数据库连接不能跨线程使用
+            flag_ids = {target["id"]: [flag["id"] for flag in target_flags(db, target["id"])] for target in targets}
 
             def launch(item):
                 env_id, secret, port, team, target = item
-                derived = env_flag_value(secret, env_id, target["id"])
-                flag_env = {"FLAG": derived, f"FLAG_{target['id']}": derived}
+                flag_env = target_flag_env(target["id"], flag_ids[target["id"]], secret, env_id)
                 try:
                     with app.app_context():
                         container_id, network_id = start_environment(
@@ -434,7 +435,8 @@ def sweep_environments(db, now):
         if contest_live and not expired:
             continue
         try:
-            stop_environment(row["contest_id"], row["team_id"], container_id=row["container_id"])
+            # 赛题/靶机环境的容器与网络名带题号：按记录里的题号定位，才能连专属网络一并移除
+            stop_environment(row["contest_id"], row["team_id"], row["puzzle_id"], container_id=row["container_id"])
             with transaction(db, write=True):
                 db.execute(
                     "UPDATE breach_environments SET status = 'stopped', stopped_at = ? WHERE id = ?", (now, row["id"]),
@@ -634,9 +636,10 @@ def stop_puzzle_environment(puzzle_id):
 def submit_breach_flag():
     value = text_field("flag", "Flag", 256)
     db = get_db()
+    # 回收在写事务之外进行：回收自身要写库，且不应在持有写锁期间等待 Docker
+    sweep_environments(db, int(time.time()))
     with transaction(db, write=True):
         contest, team, now = live_context(db, "breach")
-        sweep_environments(db, now)
         attempts = db.execute(
             "SELECT COUNT(*) FROM breach_submissions WHERE contest_id = ? AND team_id = ? AND submitted_at >= ?",
             (contest["id"], team["id"], now - 60),
@@ -662,7 +665,7 @@ def submit_breach_flag():
                 match = next(
                     (row for row in flags
                      if not row["flag_digest"]
-                     and hmac.compare_digest(env_flag_value(environment["secret"], environment["id"], row["id"]), value)),
+                     and flag_matches(env_flag_value(environment["secret"], environment["id"], row["id"]), value)),
                     None,
                 )
         prior = db.execute(
@@ -770,45 +773,75 @@ def target_context(db, target_id):
     return contest, team, task, now
 
 
+def target_flag_env(target_id, flag_ids, secret, env_id):
+    """AWDP 靶机容器的 Flag 环境变量（按队派生）。
+
+    布置了靶点：FLAG_1…FLAG_N 按靶点顺序各注入一枚独立 Flag，另附与 FLAG_1 同值的 FLAG 以兼容只读 FLAG 的镜像；
+    未布置靶点：FLAG 与 FLAG_<靶机ID> 同值（靶机级单枚 Flag）。
+    """
+    if not flag_ids:
+        derived = env_flag_value(secret, env_id, target_id)
+        return {"FLAG": derived, f"FLAG_{target_id}": derived}
+    values = [env_flag_value(secret, env_id, flag_id, kind="target") for flag_id in flag_ids]
+    return {"FLAG": values[0], **{f"FLAG_{index}": value for index, value in enumerate(values, start=1)}}
+
+
 @site.get("/awdp/targets/<int:target_id>")
 @login_required
 def round_target(target_id):
     target = readable_target(target_id)
     db = get_db()
+    contest_id = g.contest["id"]
+    team_id = g.team["id"] if g.team else None
     files = db.execute(
         """SELECT f.id, f.name, length(f.content) AS size FROM puzzle_files a JOIN uploads f ON f.id = a.file_id
            WHERE a.puzzle_id = ? ORDER BY f.id""", (target_id,),
     ).fetchall()
-    solves = db.execute(
-        "SELECT COUNT(*) FROM flag_submissions WHERE puzzle_id = ? AND verdict = 'correct'", (target_id,),
-    ).fetchone()[0]
-    history = flag_records(db, g.contest["id"], team_id=g.team["id"], puzzle_id=target_id, limit=20) if g.team else []
-    solved = bool(g.team and db.execute(
-        "SELECT 1 FROM flag_submissions WHERE puzzle_id = ? AND team_id = ? AND verdict = 'correct'",
-        (target_id, g.team["id"]),
-    ).fetchone())
+    flags = [dict(flag) for flag in target_flags(db, target_id)]
+    awards = target_awards(db, contest_id, [target_id])[target_id]
+    breaches = target_breaches(awards, len(flags))
+    mine = awards.get(team_id, set())
+    # 动态靶机每支队伍各有一个实例：按攻破了几支对手队伍的靶机计进度；静态靶机没有对手实例，只看 Flag 是否拿全
+    per_team = bool(target["env_image"])
+    rival_total = rival_count(db, contest_id, team_id) if per_team else 0
+    rival_breached = len(breaches.get(team_id, set()) - {None})
+    for flag in flags:
+        victims = {victim for flag_id, victim in mine if flag_id == flag["id"]}
+        flag["obtained"] = bool(victims)
+        flag["solves"] = sum(any(flag_id == flag["id"] for flag_id, _ in obtained) for obtained in awards.values())
+        flag["state"] = obtained_pill(len(victims), rival_total)
+    state = attack_pill(rivals=rival_total, breached=rival_breached, flags=len(mine),
+                        need=(len(flags) or 1) * (rival_total or 1))
+    history = flag_records(db, contest_id, team_id=team_id, puzzle_id=target_id, limit=20) if team_id else []
     environment = rivals = None
     if target["env_image"]:
         sweep_environments(db, g.now)
         if g.team:
             environment = db.execute(
                 "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
-                (g.contest["id"], g.team["id"], target_id),
+                (contest_id, team_id, target_id),
             ).fetchone()
-            # 其他队伍的在线靶机：攻击方据此访问对手容器提取 Flag
-            rivals = db.execute(
-                """SELECT e.host_port, t.name AS team_name FROM breach_environments e
+            # 其他队伍的在线靶机：攻击方据此访问对手容器提取 Flag；附本队攻下该台几个靶点的进度
+            rivals = [dict(row) for row in db.execute(
+                """SELECT e.team_id, e.host_port, t.name AS team_name FROM breach_environments e
                    JOIN teams t ON t.id = e.team_id
                    WHERE e.contest_id = ? AND e.puzzle_id = ? AND e.team_id != ?
                    AND e.status = 'running' AND (e.expires_at IS NULL OR e.expires_at > ?)
                    ORDER BY e.host_port""",
-                (g.contest["id"], target_id, g.team["id"], g.now),
-            ).fetchall()
+                (contest_id, target_id, team_id, g.now),
+            ).fetchall()]
+            for rival in rivals:
+                obtained = sum(1 for _, victim in mine if victim == rival["team_id"])
+                rival["state"] = attack_pill(flags=obtained, need=len(flags) or 1)
     notice = session.pop("flag_notice", None)
     if notice and notice["puzzle_id"] != target_id:
         notice = None
-    return render_template("target.html", title=target["title"], target=target, files=files, solves=solves,
-                           solved=solved, history=history, notice=notice, environment=environment, rivals=rivals,
+    return render_template("target.html", title=target["title"], target=target, files=files, solves=len(breaches),
+                           state=state, done=state[0] == "success", history=history, notice=notice,
+                           environment=environment, rivals=rivals, flags=flags, flag_total=len(flags),
+                           flag_solved=sum(flag["obtained"] for flag in flags), per_team=per_team,
+                           rival_total=rival_total, rival_breached=rival_breached,
+                           total_points=sum(flag["points"] for flag in flags) if flags else target["points"],
                            environment_host=environment_host() if target["env_image"] else "",
                            max_upload=current_app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024))
 
@@ -819,6 +852,7 @@ def submit_target_flag(target_id):
     value = text_field("flag", "Flag", 256)
     db = get_db()
     own_flag = False
+    title = victim_name = ""
     with transaction(db, write=True):
         contest, team, target, now = target_context(db, target_id)
         attempts = db.execute(
@@ -827,40 +861,62 @@ def submit_target_flag(target_id):
         ).fetchone()[0]
         if attempts >= 30:
             abort(429)
-        prior = db.execute(
-            "SELECT 1 FROM flag_submissions WHERE puzzle_id = ? AND team_id = ? AND verdict = 'correct'",
-            (target_id, team["id"]),
-        ).fetchone()
-        digest_match = bool(target["flag_digest"]) and hmac.compare_digest(
-            target["flag_digest"], flag_digest(target["flag_salt"], value))
-        # 动态靶机：比对全部队伍在线环境的派生 Flag，命中他队环境才算攻击成功
-        dynamic_match = False
-        if not digest_match and not target["flag_digest"] and target["env_image"]:
-            for env in db.execute(
-                """SELECT * FROM breach_environments WHERE contest_id = ? AND puzzle_id = ?
-                   AND status = 'running' AND (expires_at IS NULL OR expires_at > ?)""",
-                (contest["id"], target_id, now),
-            ).fetchall():
-                if hmac.compare_digest(env_flag_value(env["secret"], env["id"], target_id), value):
-                    dynamic_match = env["team_id"] != team["id"]
+        # 动态靶机：比对全部队伍在线环境的派生 Flag，命中哪支队伍的环境即记为攻破该队伍的靶机
+        rivals = db.execute(
+            """SELECT e.*, t.name AS team_name FROM breach_environments e JOIN teams t ON t.id = e.team_id
+               WHERE e.contest_id = ? AND e.puzzle_id = ?
+               AND e.status = 'running' AND (e.expires_at IS NULL OR e.expires_at > ?)""",
+            (contest["id"], target_id, now),
+        ).fetchall() if target["env_image"] else []
+        flags = target_flags(db, target_id)
+        slots = flags or [target]  # 可提交的 Flag：布置了靶点即各靶点各一枚，否则为靶机级 Flag
+        # 静态 Flag 各队靶机相同：摘要命中即算，不区分取自哪支队伍
+        hit, victim = next((slot for slot in slots if slot["flag_digest"] and hmac.compare_digest(
+            slot["flag_digest"], flag_digest(slot["flag_salt"], value))), None), None
+        for env in rivals:
+            if hit is not None or own_flag:
+                break
+            for slot in slots:
+                if slot["flag_digest"]:
+                    continue
+                derived = (env_flag_value(env["secret"], env["id"], slot["id"], kind="target") if flags
+                           else env_flag_value(env["secret"], env["id"], target_id))
+                if flag_matches(derived, value):
+                    # 命中本队环境的 Flag 不算攻击成功；命中他队环境即攻破该队靶机上的这个靶点
                     own_flag = env["team_id"] == team["id"]
+                    hit, victim = (None, None) if own_flag else (slot, env)
                     break
+        matched = hit is not None
+        flag_id = hit["id"] if matched and flags else None
+        title = hit["title"] if matched and flags else ""
+        victim_id = victim["team_id"] if victim else None
+        victim_name = victim["team_name"] if victim else ""
+        # 同一支对手的同一靶点只计一次；静态 Flag 不区分对手，即每队每靶点一次
+        prior = matched and db.execute(
+            """SELECT 1 FROM flag_submissions WHERE contest_id = ? AND team_id = ? AND verdict = 'correct'
+               AND target_flag_id IS ? AND victim_team_id IS ? LIMIT 1""",
+            (contest["id"], team["id"], flag_id, victim_id),
+        ).fetchone() is not None
         if prior:
             verdict, points = "already_solved", 0
-        elif digest_match or dynamic_match:
-            verdict, points = "correct", target["points"]
+        elif matched:
+            verdict, points = "correct", hit["points"]
         else:
             verdict, points = "incorrect", 0
         db.execute(
-            """INSERT INTO flag_submissions (contest_id, puzzle_id, team_id, user_id, verdict, points, submitted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (contest["id"], target_id, team["id"], g.user["id"], verdict, points, now),
+            """INSERT INTO flag_submissions (contest_id, puzzle_id, target_flag_id, team_id, victim_team_id, user_id,
+                                            verdict, points, submitted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (contest["id"], target_id, flag_id, team["id"], victim_id, g.user["id"], verdict, points, now),
         )
         if verdict == "correct":
-            add_score(db, contest_id=contest["id"], team_id=team["id"], kind="attack", delta=target["points"],
-                      round_no=max(1, contest_state(contest, now)["round"]),
-                      reason=f"攻破靶机「{target['title']}」", actor_id=g.user["id"], now=now)
-    notice = {"puzzle_id": target_id, "verdict": verdict, "points": points, "own_flag": own_flag}
+            reason = (f"攻破队伍「{victim_name}」" if victim else "攻破") + f"靶机「{target['title']}」"
+            if flags:
+                reason += f"的靶点「{title}」"
+            add_score(db, contest_id=contest["id"], team_id=team["id"], kind="attack", delta=points,
+                      round_no=max(1, contest_state(contest, now)["round"]), reason=reason, actor_id=g.user["id"], now=now)
+    notice = {"puzzle_id": target_id, "verdict": verdict, "points": points, "own_flag": own_flag, "title": title,
+              "victim": victim_name}
     session["flag_notice"] = notice
     return redirect(url_for("site.round_target", target_id=target_id), code=303)
 
@@ -877,8 +933,7 @@ def start_target_environment(target_id):
         if ensured is None:
             return redirect(url_for("site.round_target", target_id=target_id), code=303)
         env_id, secret, port = ensured
-    derived = env_flag_value(secret, env_id, target["id"])
-    flag_env = {"FLAG": derived, f"FLAG_{target['id']}": derived}
+    flag_env = target_flag_env(target["id"], [flag["id"] for flag in target_flags(db, target["id"])], secret, env_id)
     return launch_environment(db, contest=contest, team=team, env_id=env_id, puzzle_id=target["id"],
                               image=target["env_image"], container_port=target["env_container_port"],
                               host_port=port, flag_env=flag_env, now=now,

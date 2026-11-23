@@ -37,7 +37,7 @@
       <tbody>{% for row in rows %}<tr>
         <td><strong>{{ row.title }}</strong></td>
         <td>{{ row.category }}</td>
-        <td>{{ row.points }}</td>
+        <td>{{ row.points }}{% if row.flag_total %}<br><small class="arena-muted">{{ row.flag_total }} 个靶点</small>{% endif %}</td>
         <td>{{ ui.pill("动态容器", "success") if row.has_env else ui.pill("静态 Flag", "neutral") }}</td>
         <td>{{ ui.pill(("已开放" if open else "待开放") if row.published else "草稿", "success" if row.published and open else "neutral") }}</td>
         <td><div class="arena-actions">

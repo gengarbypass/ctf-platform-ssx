@@ -11,7 +11,7 @@ from .domain import (
     CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, DIFFICULTIES, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError, admin_required,
     choice_field, contest_state, integer_field, new_flag, parse_local_time, text_field, username_value, validate_password,
 )
-from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix
+from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix, target_flags
 from .range import RangeError, probe_image, stop_environment
 from .storage import crop_cover, read_upload, save_upload
 from .views import PAGE_SIZE, page_number, records_kind, spawn_autostart
@@ -621,11 +621,13 @@ def team_delete(team_id):
     if request.method == "GET":
         return render_template(
             "manage/delete.html", title="删除队伍", subject=team["name"], scoped=True, back=url_for("manage.teams"),
-            impact="队伍为全局名册：将从所有比赛中移除并解除成员分队，同时删除其全部提交、补丁、积分、服务状态与环境容器。",
+                           impact="队伍为全局名册：将从所有比赛中移除并解除成员分队，同时删除其全部提交、补丁、积分、服务状态与环境容器；其他队伍攻破其靶机的攻击记录一并删除，已获积分保留。",
         )
     with transaction(db, write=True):
         require_current_admin(db)
         env_rows = db.execute("SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE team_id = ?", (team_id,)).fetchall()
+        # 参赛关联表的队伍列没有外键，需一并移除，否则留下孤儿行被计入队伍数
+        db.execute("DELETE FROM contest_teams WHERE team_id = ?", (team_id,))
         if not db.execute("DELETE FROM teams WHERE id = ?", (team_id,)).rowcount:
             abort(404)
     purge_environments(env_rows)
@@ -683,6 +685,7 @@ def bank():
         abort(404)
     rows = get_db().execute(
         """SELECT p.*, (p.env_image IS NOT NULL) AS has_env,
+                  (SELECT COUNT(*) FROM target_flags tf WHERE tf.puzzle_id = p.id) AS flag_total,
                   GROUP_CONCAT(c.title, '、') AS contests
            FROM puzzles p
            LEFT JOIN contest_puzzles cp ON cp.puzzle_id = p.id
@@ -704,7 +707,8 @@ def contest_puzzles(contest_id):
     kind = contest["mode"]
     unit = "靶机" if kind == "round" else "赛题"
     rows = db.execute(
-        """SELECT p.id, p.title, p.category, p.points, p.published, (p.env_image IS NOT NULL) AS has_env
+        """SELECT p.id, p.title, p.category, p.points, p.published, (p.env_image IS NOT NULL) AS has_env,
+                  (SELECT COUNT(*) FROM target_flags tf WHERE tf.puzzle_id = p.id) AS flag_total
            FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
            WHERE cp.contest_id = ? AND p.kind = ? ORDER BY p.id""",
         (contest_id, kind),
@@ -797,7 +801,8 @@ def bank_edit(task_id):
         ).fetchall() if task else []
         return render_template("manage/challenge_form.html", title=f"编辑{unit}" if task else f"创建{unit}", task=task,
                                kind=kind, bank=True, files=files, categories=CATEGORIES, difficulties=DIFFICULTIES,
-                               join_contest=join_contest, subtitle="题库")
+                               join_contest=join_contest, subtitle="题库",
+                               target_flags=target_flags(db, task_id) if task and kind == "round" else [])
     title = text_field("title", "题目名称", 100)
     description = text_field("description", "题目说明", 16000)
     published = request.form.get("published") == "1"
@@ -811,11 +816,15 @@ def bank_edit(task_id):
             raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
         env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
     flag = text_field("flag", "Flag", 256, optional=True)
-    if not task and not flag and not env_image:
+    # AWDP 靶机可布置多个靶点（每靶点一枚独立 Flag）；未布置靶点时沿用靶机级 Flag
+    flag_rows = target_flag_rows(puzzle_id=task_id, dynamic=bool(env_image)) if kind == "round" else []
+    if flag_rows and flag:
+        raise FormError("已布置靶点的靶机按靶点计分，请将靶机级 Flag 留空。")
+    if not task and not flag and not env_image and not flag_rows:
         raise FormError("请填写 Flag；或在填写环境镜像后留空以按队伍动态生成。")
-    if not env_image and task and not flag and not task["flag_digest"]:
+    if not env_image and task and not flag and not task["flag_digest"] and not flag_rows:
         raise FormError("该赛题当前为动态环境赛题，请保留环境镜像或改填固定 Flag。")
-    salt_and_digest = new_flag(flag) if flag else (("", "") if (env_image and not task) else None)
+    salt_and_digest = new_flag(flag) if flag else (("", "") if flag_rows or (env_image and not task) else None)
     uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
     remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
     with transaction(db, write=True):
@@ -841,6 +850,8 @@ def bank_edit(task_id):
                 (kind, title, category, difficulty, description, points, *salt_and_digest, published,
                  env_image, env_container_port),
             ).lastrowid
+        if kind == "round":
+            save_target_flags(db, task_id, flag_rows)
         if join_contest:
             db.execute(
                 "INSERT OR IGNORE INTO contest_puzzles (contest_id, puzzle_id, added_at) VALUES (?, ?, ?)",
@@ -880,6 +891,83 @@ def bank_delete(task_id):
             abort(404)
     purge_environments(env_rows)
     return saved("赛题已删除。", "manage.bank")
+
+
+def target_flag_rows(*, puzzle_id, dynamic):
+    """解析题库靶机表单的靶点多行输入；整行留空的行跳过，全部留空即不布置靶点。
+
+    动态靶机（已填写环境镜像）的靶点 Flag 须留空——各队 Flag 由环境启动时派生注入；
+    静态靶机的每个靶点都须填写 Flag，编辑时留空表示保留原值。
+    """
+    ids = request.form.getlist("flag_id")
+    titles = request.form.getlist("flag_title")
+    point_values = request.form.getlist("flag_points")
+    values = request.form.getlist("flag_value")
+    descriptions = request.form.getlist("flag_description")
+    count = max(len(ids), len(titles), len(point_values), len(values), len(descriptions))
+    existing = {row["id"]: row for row in get_db().execute(
+        "SELECT id, flag_salt, flag_digest FROM target_flags WHERE puzzle_id = ?", (puzzle_id,)).fetchall()} if puzzle_id else {}
+    rows = []
+    for index in range(count):
+        raw_id = ids[index].strip() if index < len(ids) else ""
+        title = titles[index].strip() if index < len(titles) else ""
+        value = values[index].strip() if index < len(values) else ""
+        description = descriptions[index].strip() if index < len(descriptions) else ""
+        if not raw_id and not title and not value and not description:
+            continue
+        label = f"第 {index + 1} 行靶点"
+        flag_id = int(raw_id) if raw_id.isdecimal() else 0
+        if raw_id and flag_id not in existing:
+            raise FormError(f"{label}已被删除，请刷新页面后重试。")
+        if not title:
+            raise FormError(f"请填写{label}的名称。")
+        if len(title) > 100:
+            raise FormError(f"{label}名称最多 100 个字符。")
+        if len(value) > 256:
+            raise FormError(f"{label}Flag 最多 256 个字符。")
+        if len(description) > 16000:
+            raise FormError(f"{label}提示最多 16000 个字符。")
+        try:
+            points = int(point_values[index]) if index < len(point_values) else 0
+        except ValueError as error:
+            raise FormError(f"{label}分值须为整数。") from error
+        if not 1 <= points <= 100_000:
+            raise FormError(f"{label}分值须在 1 到 100000 之间。")
+        if dynamic:
+            if value:
+                raise FormError(f"{label}的 Flag 须留空：已填写环境镜像的靶机，各队 Flag 由平台动态生成。")
+            salt, digest = "", ""
+        elif value:
+            salt, digest = new_flag(value)
+        elif flag_id and existing[flag_id]["flag_digest"]:
+            salt, digest = existing[flag_id]["flag_salt"], existing[flag_id]["flag_digest"]
+        else:
+            raise FormError(f"请填写{label}的 Flag，或为靶机填写环境镜像启用动态 Flag。")
+        rows.append({"id": flag_id, "title": title, "points": points, "description": description,
+                     "flag_salt": salt, "flag_digest": digest})
+    return rows
+
+
+def save_target_flags(db, puzzle_id, rows):
+    """按表单行同步靶机的靶点：已有的就地更新，新的插入，未出现在表单里的删除。"""
+    keep = []
+    for row in rows:
+        values = (row["title"], row["description"], row["points"], row["flag_salt"], row["flag_digest"])
+        if row["id"]:
+            db.execute(
+                """UPDATE target_flags SET title = ?, description = ?, points = ?, flag_salt = ?, flag_digest = ?
+                   WHERE id = ? AND puzzle_id = ?""", (*values, row["id"], puzzle_id))
+            keep.append(row["id"])
+        else:
+            keep.append(db.execute(
+                """INSERT INTO target_flags (puzzle_id, title, description, points, flag_salt, flag_digest)
+                   VALUES (?, ?, ?, ?, ?, ?)""", (puzzle_id, *values),
+            ).lastrowid)
+    if keep:
+        db.execute(f"DELETE FROM target_flags WHERE puzzle_id = ? AND id NOT IN ({','.join('?' * len(keep))})",
+                   (puzzle_id, *keep))
+    else:
+        db.execute("DELETE FROM target_flags WHERE puzzle_id = ?", (puzzle_id,))
 
 
 def breach_flag_rows(*, allow_empty_flags):

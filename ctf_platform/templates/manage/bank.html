@@ -18,7 +18,7 @@
         <td><strong>{{ row.title }}</strong></td>
         <td>{{ ui.pill("AWDP 靶机", "warning") if row.kind == 'round' else ui.pill("解题赛题", "neutral") }}</td>
         <td>{{ row.category }}</td>
-        <td>{{ row.points }}</td>
+        <td>{{ row.points }}{% if row.kind == 'round' and row.flag_total %}<br><small class="arena-muted">{{ row.flag_total }} 个靶点</small>{% endif %}</td>
         <td>{{ ui.pill("动态容器", "success") if row.has_env else ui.pill("静态 Flag", "neutral") }}</td>
         <td>{{ row.contests or '—' }}</td>
         <td>{{ ui.pill("已开放" if row.published else "草稿", "success" if row.published else "neutral") }}</td>

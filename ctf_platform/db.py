@@ -10,9 +10,9 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 12
 REBUILT_TABLES = (
-    "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "flag_submissions",
+    "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "target_flags", "flag_submissions",
     "contest_puzzles", "contest_teams", "breach_flags", "breach_submissions", "breach_environments",
     "round_tasks", "service_states", "patches", "score_events",
 )
@@ -196,6 +196,12 @@ def prepare_schema(connection):
                     connection.execute(
                         "INSERT OR IGNORE INTO env_ports (port, allocated_at) "
                         "SELECT host_port, strftime('%s', 'now') FROM breach_environments WHERE host_port IS NOT NULL")
+            if 1 <= version <= 10:
+                # AWDP 靶机的靶点：提交记录增加命中的靶点列（重建按列名回拷，旧表需先补齐同名列）
+                add_column(connection, "flag_submissions", "target_flag_id INTEGER")
+            if 1 <= version <= 11:
+                # AWDP 攻击按被攻破的队伍计次：提交记录增加 Flag 取自哪支队伍靶机的列（旧行为空，沿用每队一次）
+                add_column(connection, "flag_submissions", "victim_team_id INTEGER")
             if 1 <= version <= 7:
                 # 队伍全局化：同名队伍合并到最早创建的一支，所有引用重定向；
                 # 随后把旧"比赛私有队伍"登记为参赛关联（重建后 teams 不再带 contest_id）。
