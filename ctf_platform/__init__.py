@@ -154,6 +154,9 @@ def create_app(overrides=None):
         return render_template("error.html", code=400, message=str(error)), 400
 
     def client_error(error):
+        if request.endpoint == "static":
+            # 静态资源请求不加载页面上下文（见 load_context），整页错误页渲染不了：直接返回原始错误页
+            return error.get_response()
         defaults = {403: "当前账号无权访问此页面。", 404: "页面或记录不存在。", 413: "上传文件超出平台限制。", 429: "请求过于频繁，请稍后重试。"}
         message = error.description if error.description != type(error).description else defaults.get(error.code, "请求无效，请检查后重试。")
         return render_template("error.html", code=error.code, message=message), error.code

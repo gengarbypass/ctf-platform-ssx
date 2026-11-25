@@ -206,6 +206,16 @@ class PlatformTest(unittest.TestCase):
         response = self.app.test_client().get("/healthz")
         self.assertEqual(response.json, {"status": "ok", "revision": "a" * 40})
 
+    def test_missing_static_file_returns_not_found(self):
+        """不存在的静态文件返回 404：静态资源请求不加载页面上下文，整页错误页渲染不了。"""
+        client = self.app.test_client()
+        with client.get("/static/arena.css") as existing:
+            self.assertEqual(existing.status_code, 200)
+        self.assertEqual(client.get("/static/missing.js").status_code, 404)
+        missing = client.get("/nowhere")
+        self.assertEqual(missing.status_code, 404)
+        self.assertIn("页面或记录不存在", missing.get_data(as_text=True))
+
     def test_flag_judgement_download_and_concurrent_one_time_award(self):
         contest_id = self.contest()
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")
