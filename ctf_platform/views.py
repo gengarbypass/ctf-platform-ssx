@@ -1050,7 +1050,8 @@ def records():
 @site.get("/images/<int:file_id>")
 def image(file_id):
     is_admin = g.user and g.user["role"] == "admin"
-    if not is_admin and file_id not in {g.brand["logo_id"], g.contest["cover_id"] if g.contest else None}:
+    visible_images = {g.brand["logo_id"], g.brand["home_background_id"], g.contest["cover_id"] if g.contest else None}
+    if not is_admin and file_id not in visible_images:
         abort(404)
     row = get_db().execute("SELECT * FROM uploads WHERE id = ? AND kind IN ('logo', 'cover')", (file_id,)).fetchone()
     if not row:

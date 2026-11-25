@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "target_flags", "flag_submissions",
     "contest_puzzles", "contest_teams", "breach_flags", "breach_submissions", "breach_environments",
@@ -236,11 +236,12 @@ def prepare_schema(connection):
                         "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) "
                         "SELECT contest_id, id FROM teams WHERE contest_id IS NOT NULL")
             schema = tuple(schema_statements())
-            if version:
+            if 1 <= version <= 12:
                 rebuild_tables(connection, schema)
             else:
                 for statement in schema:
                     connection.execute(statement)
+            add_column(connection, "site_settings", "home_background_id INTEGER REFERENCES uploads(id)")
             # rename/drop 可能遗留悬挂外键：如实修复
             for table in dangling_junctions(connection):
                 recreate_junction(connection, table, schema)

@@ -1221,15 +1221,22 @@ def brand():
         raise FormError("颜色须使用六位十六进制。")
     radius = integer_field("radius", "卡片圆角", 4, 24)
     logo = read_upload(request.files.get("logo"), "logo")
+    home_background = read_upload(request.files.get("home_background"), "cover")
     remove_logo = request.form.get("remove_logo") == "1"
+    remove_home_background = request.form.get("remove_home_background") == "1"
     db = get_db()
     with transaction(db, write=True):
-        old_id = db.execute("SELECT logo_id FROM site_settings WHERE id = 1").fetchone()[0]
-        logo_id = save_upload(db, logo, g.now) if logo else (None if remove_logo else old_id)
+        previous = db.execute("SELECT logo_id, home_background_id FROM site_settings WHERE id = 1").fetchone()
+        logo_id = save_upload(db, logo, g.now) if logo else (None if remove_logo else previous["logo_id"])
+        home_background_id = None if remove_home_background else previous["home_background_id"]
+        if home_background:
+            home_background_id = save_upload(db, home_background, g.now)
         db.execute(
-            "UPDATE site_settings SET name = ?, icon = ?, accent = ?, background = ?, surface = ?, radius = ?, logo_id = ? WHERE id = 1",
-            (name, icon, *colors, radius, logo_id),
+            """UPDATE site_settings SET name = ?, icon = ?, accent = ?, background = ?, surface = ?, radius = ?,
+               logo_id = ?, home_background_id = ? WHERE id = 1""",
+            (name, icon, *colors, radius, logo_id, home_background_id),
         )
-        if old_id is not None and old_id != logo_id:
-            db.execute("DELETE FROM uploads WHERE id = ?", (old_id,))
+        for old_id, new_id in ((previous["logo_id"], logo_id), (previous["home_background_id"], home_background_id)):
+            if old_id is not None and old_id != new_id:
+                db.execute("DELETE FROM uploads WHERE id = ?", (old_id,))
     return saved("平台外观已应用。", "manage.brand")

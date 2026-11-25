@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS site_settings (
     background TEXT NOT NULL DEFAULT '#f2f5fb',
     surface TEXT NOT NULL DEFAULT '#ffffff',
     radius INTEGER NOT NULL DEFAULT 12 CHECK (radius BETWEEN 4 AND 24),
-    logo_id INTEGER REFERENCES uploads(id)
+    logo_id INTEGER REFERENCES uploads(id),
+    home_background_id INTEGER REFERENCES uploads(id)
 );
 
 CREATE TABLE IF NOT EXISTS contests (

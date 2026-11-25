@@ -15,7 +15,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from ctf_platform import create_app
-from ctf_platform.db import connect
+from ctf_platform.db import SCHEMA_VERSION, connect
 from ctf_platform.domain import env_flag_value
 
 
@@ -1203,7 +1203,7 @@ class PlatformTest(unittest.TestCase):
             db.execute("PRAGMA foreign_keys = ON")
         upgraded = create_app({**self.settings, "ADMIN_PASSWORD": ""})
         admin = self.login("arenaops", upgraded)
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 13)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], SCHEMA_VERSION)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertIn("target_flag_id", [row["name"] for row in self.lookup("PRAGMA table_info(flag_submissions)")])
         self.assertEqual([row["name"] for row in self.lookup(
@@ -1254,7 +1254,7 @@ class PlatformTest(unittest.TestCase):
             db.execute("PRAGMA foreign_keys = ON")
         upgraded = create_app({**self.settings, "ADMIN_PASSWORD": ""})
         self.login("arenaops", upgraded)
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 13)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], SCHEMA_VERSION)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertIn("victim_team_id", [row["name"] for row in self.lookup("PRAGMA table_info(flag_submissions)")])
         self.assertEqual([row["name"] for row in self.lookup(
@@ -1293,7 +1293,7 @@ class PlatformTest(unittest.TestCase):
             db.execute("DROP INDEX one_target_machine_award")
             db.execute("PRAGMA user_version = 12")
         self.login("arenaops", create_app({**self.settings, "ADMIN_PASSWORD": ""}))
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 13)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], SCHEMA_VERSION)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertIn("one_target_machine_award", [row["name"] for row in self.lookup(
             "SELECT name FROM sqlite_master WHERE tbl_name = 'flag_submissions' AND type = 'index'")])
@@ -1470,12 +1470,58 @@ class PlatformTest(unittest.TestCase):
         self.post(player, f"/challenges/{puzzle_id}/flag", code=403, flag="flag{fixture}")
         self.post(self.admin, "/manage/brand", name="测试品牌", icon="shield", accent="#2458d8", background="#eff4fc",
                   surface="#ffffff", radius=16, logo=(png(), "logo.png"))
+        logo_id = self.lookup("SELECT logo_id FROM site_settings WHERE id = 1")[0][0]
+        with closing(connect(self.app.config["DATABASE"])) as db:
+            db.execute("ALTER TABLE site_settings DROP COLUMN home_background_id")
+            db.execute("PRAGMA user_version = 13")
         new_app = create_app({**self.settings, "ADMIN_PASSWORD": ""})
         admin = self.login("arenaops", new_app)
         self.assertIn("测试品牌", admin.get("/manage/brand").get_data(as_text=True))
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], SCHEMA_VERSION)
+        self.assertEqual(tuple(self.lookup("SELECT logo_id, home_background_id FROM site_settings")[0]), (logo_id, None))
+        self.assertEqual(admin.get(f"/images/{logo_id}").mimetype, "image/png")
         self.assertEqual(admin.get(f"/downloads/{file_id}").data, b"Navigation sample")
         with new_app.app_context():
             self.assertEqual(new_app.config["FLAG_KEY"], self.app.config["FLAG_KEY"])
+
+    def test_brand_home_background_upload_replace_and_remove(self):
+        contest_id = self.contest(cover=True)
+        player, _ = self.player(contest_id, "bluefox", "BlueFox")
+        cover_id = self.lookup("SELECT cover_id FROM contests WHERE id = ?", (contest_id,))[0][0]
+        cover_src = f'src="/images/{cover_id}"'
+        self.assertIn(cover_src, player.get("/").get_data(as_text=True))
+        form = {"name": "测试品牌", "icon": "shield", "accent": "#2458d8", "background": "#eff4fc",
+                "surface": "#ffffff", "radius": 16}
+        self.post(player, "/manage/brand", **form, home_background=(png(), "blocked.png"), code=403)
+        self.post(self.admin, "/manage/brand", **form, logo=(png(), "logo.png"), home_background=(png(), "home.png"))
+        logo_id, image_id = self.lookup("SELECT logo_id, home_background_id FROM site_settings")[0]
+        image_src = f'src="/images/{image_id}"'
+        self.assertIn(image_src, self.admin.get("/manage/brand").get_data(as_text=True))
+        home = player.get("/").get_data(as_text=True)
+        self.assertIn(image_src, home)
+        self.assertNotIn(cover_src, home)
+        puzzle_home = player.get("/puzzle").get_data(as_text=True)
+        self.assertIn(cover_src, puzzle_home)
+        self.assertNotIn(image_src, puzzle_home)
+        self.assertEqual(player.get(f"/images/{image_id}").mimetype, "image/png")
+
+        self.post(self.admin, "/manage/brand", **form, home_background=(io.BytesIO(b"invalid"), "home.png"), code=400)
+        self.post(self.admin, "/manage/brand", **{**form, "radius": 18})
+        self.assertIn(image_src, player.get("/").get_data(as_text=True))
+        self.post(self.admin, f"/manage/contests/{contest_id}/deactivate")
+        self.assertIn(image_src, player.get("/").get_data(as_text=True))
+
+        self.post(self.admin, "/manage/brand", **form, home_background=(png(), "replacement.png"))
+        replacement_id = self.lookup("SELECT home_background_id FROM site_settings")[0][0]
+        self.assertNotEqual(replacement_id, image_id)
+        self.assertIn(f'src="/images/{replacement_id}"', player.get("/").get_data(as_text=True))
+        self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id = ?", (image_id,)), [])
+
+        self.post(self.admin, f"/manage/contests/{contest_id}/activate")
+        self.post(self.admin, "/manage/brand", **form, remove_home_background="1")
+        self.assertIn(cover_src, player.get("/").get_data(as_text=True))
+        self.assertEqual(tuple(self.lookup("SELECT logo_id, home_background_id FROM site_settings")[0]), (logo_id, None))
+        self.assertEqual(self.lookup("SELECT id FROM uploads WHERE id = ?", (replacement_id,)), [])
 
     def test_scoreboards_have_independent_blue_white_layouts(self):
         contest_id = self.contest()
@@ -1601,7 +1647,7 @@ class PlatformTest(unittest.TestCase):
         admin = self.login("arenaops", upgraded)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT id, mode, active, round_seconds FROM contests ORDER BY id")],
                          [(puzzle_only, "puzzle", 0, None), (mixed, "puzzle", 0, 1800), (rounds, "round", 1, 900)])
-        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], 13)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], SCHEMA_VERSION)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
         self.assertEqual(len(self.lookup("SELECT id FROM puzzles")), 1)
         self.assertEqual(self.lookup("SELECT contest_id FROM contest_puzzles")[0][0], mixed)

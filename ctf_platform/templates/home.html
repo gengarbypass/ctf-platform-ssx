@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui with context %}
 {% block content %}
-  {{ ui.hero(g.contest, g.match, empty_title='解题赛' if entry_mode else '等待比赛开启') }}
+  {{ ui.hero(g.contest, g.match, empty_title='解题赛' if entry_mode else '等待比赛开启',
+             background_id=g.brand.home_background_id if not entry_mode else none) }}
   {% if entry_mode == 'puzzle' and g.contest %}
     <nav class="arena-two arena-mode-grid" aria-label="赛场导航">
       <a class="arena-panel arena-mode-card" href="{{ url_for('site.puzzles') }}">

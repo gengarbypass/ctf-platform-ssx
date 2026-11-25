@@ -28,22 +28,24 @@ for (const dialog of document.querySelectorAll("[data-auto-dialog]")) {
   dialog.addEventListener("close", () => document.querySelector('input[name="flag"]')?.focus());
 }
 
-for (const form of document.querySelectorAll("[data-image-form]")) {
-  const editor = form.closest("[data-brand-editor]");
-  const preview = (editor || form).querySelector("[data-image-preview]");
-  const input = form.querySelector("[data-image-input]");
-  const remove = form.querySelector("[data-remove-image]");
-  const placeholder = editor?.querySelector("[data-preview-icon]");
+for (const input of document.querySelectorAll("[data-image-form] [data-image-input]")) {
+  const form = input.form;
+  const editor = form.closest("[data-brand-editor]") || form;
+  const preview = editor.querySelector(`[data-image-preview="${input.name}"]`);
+  const remove = form.querySelector(`[data-remove-image="${input.name}"]`);
+  const placeholder = preview.parentElement.querySelector("[data-preview-icon]");
+  const frame = preview.closest("[data-image-frame]");
   const original = preview.getAttribute("src");
   let previewUrl;
   function updateImage() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     previewUrl = input.files.length ? URL.createObjectURL(input.files[0]) : null;
-    const url = previewUrl || (remove?.checked ? null : original);
+    const url = previewUrl || (remove?.checked ? preview.dataset.imageFallback : original);
     if (url) preview.src = url;
     else preview.removeAttribute("src");
     preview.hidden = !url;
     if (placeholder) placeholder.hidden = Boolean(url);
+    frame?.classList.toggle("has-image", Boolean(url));
   }
   input.addEventListener("change", updateImage);
   remove?.addEventListener("change", updateImage);
