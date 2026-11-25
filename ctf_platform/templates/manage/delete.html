@@ -6,6 +6,13 @@
     <form class="arena-form arena-form-narrow" method="post">
       {{ ui.csrf(scoped|default(false)) }}
       <p>{{ impact }}</p>
+      {% if selections %}
+        <input type="hidden" name="stage" value="execute">
+        <ul>
+          {% for selection in selections %}<li>{{ selection.name }}</li>{% endfor %}
+        </ul>
+        {% for selection in selections %}<input type="hidden" name="select" value="{{ selection.id }}">{% endfor %}
+      {% endif %}
       <div class="arena-actions">
         {{ ui.link("取消", back) }}
         <button class="arena-btn danger" type="submit">确认删除</button>

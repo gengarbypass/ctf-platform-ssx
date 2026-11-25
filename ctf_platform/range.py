@@ -30,7 +30,10 @@ def resource_name(contest_id, team_id, puzzle_id=0, *, network=False):
 
 def stop_environment(contest_id, team_id, puzzle_id=0, *, container_id=""):
     """按容器 ID 与命名兜底停止并移除容器和专属网络，找不到视为已清理。"""
-    client = docker_client()
+    try:
+        client = docker_client()
+    except Exception as error:
+        raise RangeError(f"无法连接 Docker：{error}") from error
     name = resource_name(contest_id, team_id, puzzle_id)
     for identifier in (container_id, name):
         if not identifier:

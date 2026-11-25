@@ -13,7 +13,7 @@ from .domain import (
     choice_field, contest_state, flag_digest, integer_field, new_flag, parse_local_time, text_field, username_value,
     validate_password,
 )
-from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix, target_flags
+from .queries import add_score, breach_records, flag_records, patch_records, round_rankings, score_records, service_matrix, target_flags
 from .range import RangeError, probe_image, stop_environment
 from .storage import crop_cover, read_upload, save_upload
 from .views import PAGE_SIZE, page_number, records_kind, restart_target_environments, spawn_autostart
@@ -24,11 +24,17 @@ def purge_environments(env_rows):
     for row in env_rows:
         try:
             stop_environment(row["contest_id"], row["team_id"], row["puzzle_id"], container_id=row["container_id"])
-        except RangeError:
-            pass
+        except RangeError as error:
+            current_app.logger.warning("清理动态环境失败（比赛 %s，队伍 %s，赛题 %s）：%s",
+                                       row["contest_id"], row["team_id"], row["puzzle_id"], error)
 
 
 manage = Blueprint("manage", __name__, url_prefix="/manage")
+
+TEAM_DELETE_IMPACT = (
+    "将从全局名册和所有比赛中移除所选队伍，解除成员分队并清理队伍的提交、补丁、积分、服务状态和动态环境。"
+    "其他队伍对这些队伍的攻击提交记录也会删除，已获攻击积分继续计入原成绩。"
+)
 
 
 def managed_id(mode=None):
@@ -528,22 +534,22 @@ def account_delete(user_id):
 @manage.get("/teams")
 @admin_required
 def teams():
-    rows = []
+    db = get_db()
+    contest_id = g.managed["id"] if g.managed else None
+    rows = db.execute(
+        """SELECT t.id, t.name,
+                  (ct.team_id IS NOT NULL) AS in_contest,
+                  (SELECT COUNT(*) FROM memberships m WHERE m.team_id = t.id AND m.contest_id = ?) AS members,
+                  (SELECT GROUP_CONCAT(c.title, '、') FROM contest_teams ct2
+                     JOIN contests c ON c.id = ct2.contest_id WHERE ct2.team_id = t.id) AS contests
+           FROM teams t LEFT JOIN contest_teams ct ON ct.team_id = t.id AND ct.contest_id = ?
+           GROUP BY t.id ORDER BY t.name COLLATE NOCASE""", (contest_id, contest_id),
+    ).fetchall()
     players = []
     matrix = None
     events = []
+    scores = {}
     if g.managed:
-        db = get_db()
-        contest_id = g.managed["id"]
-        rows = db.execute(
-            """SELECT t.id, t.name,
-                      (ct.team_id IS NOT NULL) AS in_contest,
-                      (SELECT COUNT(*) FROM memberships m WHERE m.team_id = t.id AND m.contest_id = ?) AS members,
-                      (SELECT GROUP_CONCAT(c.title, '、') FROM contest_teams ct2
-                         JOIN contests c ON c.id = ct2.contest_id WHERE ct2.team_id = t.id) AS contests
-               FROM teams t LEFT JOIN contest_teams ct ON ct.team_id = t.id AND ct.contest_id = ?
-               GROUP BY t.id ORDER BY t.name COLLATE NOCASE""", (contest_id, contest_id),
-        ).fetchall()
         players = db.execute(
             """SELECT u.id, u.username, u.display_name, m.team_id, t.name AS team_name
                FROM users u LEFT JOIN memberships m ON m.user_id = u.id AND m.contest_id = ?
@@ -552,8 +558,10 @@ def teams():
         if g.managed["mode"] == "round":
             matrix = service_matrix(db, contest_id, public=False)
             events = score_records(db, contest_id, limit=20)
+            scores = {row["id"]: row["points"] for row in round_rankings(db, contest_id)}
     title = "队伍与服务" if matrix is not None else "队伍管理"
-    return render_template("manage/teams.html", title=title, rows=rows, players=players, matrix=matrix, events=events)
+    return render_template("manage/teams.html", title=title, rows=rows, players=players, matrix=matrix, events=events,
+                           scores=scores, score_team_id=request.args.get("score_team_id", type=int))
 
 
 @manage.post("/contests/<int:contest_id>/teams/add")
@@ -613,25 +621,63 @@ def team_edit(team_id):
     return saved("队伍已保存并加入当前比赛。", "manage.teams")
 
 
+def delete_team_rows(db, ids):
+    placeholders = ",".join("?" * len(ids))
+    env_rows = db.execute(
+        f"SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE team_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    # 参赛关联表的队伍列没有外键，需要随队伍显式清理。
+    db.execute(f"DELETE FROM contest_teams WHERE team_id IN ({placeholders})", ids)
+    db.execute(f"DELETE FROM teams WHERE id IN ({placeholders})", ids)
+    return env_rows
+
+
+@manage.post("/teams/delete-bulk")
+@admin_required
+def teams_bulk_delete():
+    try:
+        ids = sorted({int(value) for value in request.form.getlist("select")})
+    except ValueError as error:
+        raise FormError("请选择有效的队伍。") from error
+    if not ids or any(not 1 <= team_id < 2**63 for team_id in ids):
+        raise FormError("请选择有效的队伍。")
+    deleting = request.form.get("stage") == "execute"
+    db = get_db()
+    placeholders = ",".join("?" * len(ids))
+    with transaction(db, write=deleting):
+        if deleting:
+            require_current_admin(db)
+        teams = db.execute(f"SELECT id, name FROM teams WHERE id IN ({placeholders}) ORDER BY name", ids).fetchall()
+        if len(teams) != len(ids):
+            raise FormError("部分队伍已不存在，请刷新名册后重新选择。")
+        if deleting:
+            env_rows = delete_team_rows(db, ids)
+    if not deleting:
+        return render_template(
+            "manage/delete.html", title="批量删除队伍", subject=f"已选择 {len(teams)} 支队伍", selections=teams,
+            impact=TEAM_DELETE_IMPACT, back=url_for("manage.teams"),
+        )
+    purge_environments(env_rows)
+    return saved(f"已删除 {len(teams)} 支队伍。", "manage.teams")
+
+
 @manage.route("/teams/<int:team_id>/delete", methods=["GET", "POST"])
 @admin_required
 def team_delete(team_id):
     db = get_db()
-    team = db.execute("SELECT id, name FROM teams WHERE id = ?", (team_id,)).fetchone()
-    if not team:
-        abort(404)
-    if request.method == "GET":
-        return render_template(
-            "manage/delete.html", title="删除队伍", subject=team["name"], scoped=True, back=url_for("manage.teams"),
-                           impact="队伍为全局名册：将从所有比赛中移除并解除成员分队，同时删除其全部提交、补丁、积分、服务状态与环境容器；其他队伍攻破其靶机的攻击记录一并删除，已获积分保留。",
-        )
-    with transaction(db, write=True):
-        require_current_admin(db)
-        env_rows = db.execute("SELECT contest_id, team_id, puzzle_id, container_id FROM breach_environments WHERE team_id = ?", (team_id,)).fetchall()
-        # 参赛关联表的队伍列没有外键，需一并移除，否则留下孤儿行被计入队伍数
-        db.execute("DELETE FROM contest_teams WHERE team_id = ?", (team_id,))
-        if not db.execute("DELETE FROM teams WHERE id = ?", (team_id,)).rowcount:
+    deleting = request.method == "POST"
+    with transaction(db, write=deleting):
+        if deleting:
+            require_current_admin(db)
+        team = db.execute("SELECT id, name FROM teams WHERE id = ?", (team_id,)).fetchone()
+        if not team:
             abort(404)
+        if deleting:
+            env_rows = delete_team_rows(db, (team_id,))
+    if not deleting:
+        return render_template("manage/delete.html", title="删除队伍", subject=team["name"],
+                               impact=TEAM_DELETE_IMPACT, back=url_for("manage.teams"))
     purge_environments(env_rows)
     return saved("队伍已删除。", "manage.teams")
 
@@ -1136,7 +1182,6 @@ def update_status():
 @manage.post("/scores")
 @admin_required
 def record_score():
-    contest_id = managed_id()
     team_id = integer_field("team_id", "队伍", 1, 2**63 - 1)
     kind = choice_field("kind", "计分项目", SCORE_KINDS)
     delta = integer_field("delta", "分数变化", -100_000, 100_000)
@@ -1144,7 +1189,7 @@ def record_score():
     db = get_db()
     with transaction(db, write=True):
         require_current_admin(db)
-        managed_id("round")
+        contest_id = managed_id("round")
         contest = db.execute("SELECT * FROM contests WHERE id = ?", (contest_id,)).fetchone()
         state = contest_state(contest, g.now)
         if state["round"] < 1:
@@ -1152,11 +1197,11 @@ def record_score():
         if delta == 0:
             raise FormError("分数变化不能为 0。")
         round_no = integer_field("round_no", "回合", 1, state["round"])
-        if not db.execute("SELECT 1 FROM teams WHERE id = ?", (team_id,)).fetchone():
-            abort(404)
+        if not db.execute("SELECT 1 FROM contest_teams WHERE contest_id = ? AND team_id = ?", (contest_id, team_id)).fetchone():
+            raise FormError("请选择已加入本场 AWDP 比赛的队伍。")
         add_score(db, contest_id=contest_id, team_id=team_id, kind=kind, delta=delta, round_no=round_no, reason=reason,
                   actor_id=g.user["id"], now=g.now)
-    return saved("得分变化已写入计分流水。", "manage.teams")
+    return saved(f"已记录积分调整 {delta:+d} 分。", "manage.teams", score_team_id=team_id, _anchor="score-adjustment")
 
 
 @manage.get("/submissions")

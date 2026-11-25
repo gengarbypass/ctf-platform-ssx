@@ -1843,6 +1843,91 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(player.get("/awdp").status_code, 200)
         self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
 
+    def test_bulk_delete_teams_from_global_roster(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest(mode="round")
+        player, first = self.player(contest_id, "bluefox", "BlueFox")
+        _, second = self.player(contest_id, "orangefox", "OrangeFox")
+        _, retained = self.player(contest_id, "packetlab", "PacketLab")
+        target_id = self.awdp_target(contest_id, env_image="nginx:alpine")
+        self.assertEqual(len(fake.state["networks"]), 3)
+        self.post(self.admin, "/manage/scores", contest_id=contest_id, team_id=first, kind="defense",
+                  delta=30, round_no=1, reason="补录加固积分")
+        self.post(self.admin, "/manage/scores", contest_id=contest_id, team_id=retained, kind="defense",
+                  delta=20, round_no=1, reason="补录加固积分")
+        other_contest = self.contest("蓝域杯 · 解题赛", active=False)
+        self.assertEqual(len(self.lookup("SELECT * FROM contest_teams")), 6)
+
+        route = "/manage/teams/delete-bulk"
+        selected = [first, second]
+        self.post(player, route, code=403, select=selected, stage="execute")
+        self.post(self.admin, route, code=400, select=[])
+        self.post(self.admin, route, code=400, select=[first, "invalid"], stage="execute")
+        self.post(self.admin, route, code=400, select=[first, 99999], stage="execute")
+        page = self.admin.get("/manage/teams").get_data(as_text=True)
+        self.assertIn('form="teams-bulk-delete" data-select-all', page)
+        confirm = self.post(self.admin, route, select=selected, code=200).get_data(as_text=True)
+        self.assertIn("已选择 2 支队伍", confirm)
+        self.assertIn("<li>BlueFox</li>", confirm)
+        self.assertIn("<li>OrangeFox</li>", confirm)
+        self.assertNotIn("<li>PacketLab</li>", confirm)
+        self.assertEqual(len(self.lookup("SELECT id FROM teams")), 3)
+        self.assertEqual(len(fake.state["networks"]), 3)
+
+        self.post(self.admin, route, select=selected, stage="execute")
+        self.assertEqual([row[0] for row in self.lookup("SELECT id FROM teams")], [retained])
+        for table in ("contest_teams", "memberships"):
+            rows = self.lookup(f"SELECT contest_id, team_id FROM {table} ORDER BY contest_id")
+            self.assertEqual([tuple(row) for row in rows], [(contest_id, retained), (other_contest, retained)])
+        self.assertEqual([row[0] for row in self.lookup("SELECT team_id FROM score_events")], [retained])
+        self.assertEqual([row[0] for row in self.lookup("SELECT team_id FROM breach_environments")], [retained])
+        self.assertEqual(fake.state["networks"], [f"ctfenv-c{contest_id}-t{retained}-p{target_id}-net"])
+        self.assertEqual(len(self.lookup("SELECT id FROM users WHERE role = 'player'")), 3)
+        self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
+
+    def test_manual_awdp_score_adjustments_update_ranking_and_ledger(self):
+        contest_id = self.contest(mode="round")
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        _, other = self.player(contest_id, "packetlab", "PacketLab")
+        other_contest = self.contest("蓝域杯 · 其他比赛", active=False)
+        self.post(self.admin, "/manage/teams/new", contest_id=other_contest, name="外场队伍")
+        outsider = self.lookup("SELECT id FROM teams WHERE name = '外场队伍'")[0][0]
+        self.post(self.admin, f"/manage/contests/{contest_id}/select")
+        page = self.admin.get(f"/manage/teams?score_team_id={team_id}").get_data(as_text=True)
+        self.assertIn(f"score_team_id={team_id}#score-adjustment", page)
+        form = page.split('<form id="score-adjustment"', 1)[1].split("</form>", 1)[0]
+        self.assertIn(f'<option value="{team_id}" selected>BlueFox</option>', form)
+        self.assertNotIn("外场队伍", form)
+
+        path = "/manage/scores"
+        fields = {"contest_id": contest_id, "team_id": team_id, "kind": "attack",
+                  "round_no": 1, "delta": 45, "reason": "补录本回合积分"}
+        self.post(player, path, code=403, **fields)
+        self.post(self.admin, path, code=400, **{**fields, "team_id": outsider})
+        self.post(self.admin, path, code=400, **{**fields, "contest_id": other_contest})
+        self.post(self.admin, path, code=400, **{**fields, "delta": 0})
+        self.assertEqual(self.lookup("SELECT id FROM score_events"), [])
+
+        redirect = self.post(self.admin, path, **fields)
+        self.assertEqual(redirect.location, f"/manage/teams?score_team_id={team_id}#score-adjustment")
+        board = player.get("/api/scoreboard/round").json["content"]
+        self.assertIn('data-sb-value="45"', board)
+        self.assertLess(board.index(f'data-sb-team="{team_id}"'), board.index(f'data-sb-team="{other}"'))
+        reason = "扣回误录积分"
+        self.post(self.admin, path, **{**fields, "delta": -70, "reason": reason})
+        board = player.get("/api/scoreboard/round").json["content"]
+        self.assertIn('data-sb-value="-25"', board)
+        self.assertLess(board.index(f'data-sb-team="{other}"'), board.index(f'data-sb-team="{team_id}"'))
+        self.assertIn(reason, self.admin.get("/manage/teams").get_data(as_text=True))
+
+        admin_id = self.lookup("SELECT id FROM users WHERE username = 'arenaops'")[0][0]
+        records = self.lookup("SELECT contest_id, team_id, actor_id, round_no, delta, reason FROM score_events ORDER BY id")
+        self.assertEqual([tuple(row) for row in records], [
+            (contest_id, team_id, admin_id, 1, 45, fields["reason"]),
+            (contest_id, team_id, admin_id, 1, -70, reason),
+        ])
+
     def test_delete_account_preserves_team_history_and_invalidates_session(self):
         contest_id = self.contest()
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")

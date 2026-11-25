@@ -127,16 +127,23 @@ if (probeBox) {
   });
 }
 
-const bulkDelete = document.querySelector("[data-bulk-delete]");
-if (bulkDelete) {
-  const boxes = [...bulkDelete.querySelectorAll('input[name="select"]')];
-  const button = bulkDelete.querySelector("[data-bulk-delete-button]");
+for (const form of document.querySelectorAll("form[data-bulk-delete]")) {
+  const controls = [...form.elements];
+  const boxes = controls.filter(input => input.type === "checkbox" && input.name === "select" && !input.disabled);
+  const selectAll = controls.find(input => input.hasAttribute("data-select-all"));
+  const button = form.querySelector("[data-bulk-delete-button]");
   const sync = () => {
-    button.disabled = !boxes.some(box => box.checked);
+    const selected = boxes.filter(box => box.checked).length;
+    button.disabled = selected === 0;
+    if (selectAll) {
+      selectAll.disabled = boxes.length === 0;
+      selectAll.checked = selected > 0 && selected === boxes.length;
+      selectAll.indeterminate = selected > 0 && selected < boxes.length;
+    }
   };
   boxes.forEach(box => box.addEventListener("change", sync));
-  bulkDelete.querySelector("[data-select-all]")?.addEventListener("change", event => {
-    for (const box of boxes) if (!box.disabled) box.checked = event.target.checked;
+  selectAll?.addEventListener("change", () => {
+    for (const box of boxes) box.checked = selectAll.checked;
     sync();
   });
   sync();
