@@ -775,8 +775,12 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("取自队伍「BlueFox」的靶机", first)
         self.assertIn("100 攻击积分", first)
         self.assertIn("已获取 1/3 枚", first)
-        for index in (1, 2):
-            self.post(other, f"{page}/flag", flag=values[team_a][index], follow=True, code=200)
+        self.assertNotIn(">被攻破</span>", first)
+        self.assertNotIn("靶机状态为「被攻破」", first)
+        self.assertNotIn(">被攻破</span>", player.get(page).get_data(as_text=True))
+        self.post(other, f"{page}/flag", flag=values[team_a][1])
+        last = self.post(other, f"{page}/flag", flag=values[team_a][2], follow=True, code=200).get_data(as_text=True)
+        self.assertIn("靶机状态为「被攻破」", last)
         self.assertEqual([tuple(row) for row in self.lookup(
             "SELECT target_flag_id, victim_team_id, verdict, points FROM flag_submissions WHERE team_id = ? ORDER BY id", (team_b,))],
             [(flags[0]["id"], team_a, "correct", 100), (flags[1]["id"], team_a, "correct", 100),
@@ -787,6 +791,9 @@ class PlatformTest(unittest.TestCase):
             ("attack", 200, "攻破队伍「BlueFox」靶机「镜像靶场」的靶点「协议取证还原」"),
         ])
         detail = other.get(page).get_data(as_text=True)
+        self.assertIn(">被攻破</span>", detail)
+        self.assertIn('本队靶机 <span class="arena-pill error">被攻破</span>', player.get(page).get_data(as_text=True))
+        self.assertIn(">被攻破</span>", player.get("/awdp?view=tasks").get_data(as_text=True))
         self.assertIn("本队已攻破全部 1 支对手队伍的这台靶机，全部 3 个靶点均已获取", detail)
         self.assertIn("全场已有 1 支队伍攻破过对手的这台靶机", detail)
         self.assertNotIn('name="flag"', detail)
@@ -797,7 +804,7 @@ class PlatformTest(unittest.TestCase):
         # 重复提交同一靶点：判已攻破，不重复计分
         repeat = self.post(other, f"{page}/flag", flag=values[team_a][0], follow=True, code=200).get_data(as_text=True)
         self.assertIn("该靶点已被本队攻破", repeat)
-        self.assertIn("已经攻破「BlueFox」的这台靶机", repeat)
+        self.assertIn("本队已经获得该靶点积分", repeat)
         self.assertEqual(self.lookup("SELECT COUNT(*) FROM score_events")[0][0], 3)
         # 提交本队靶点的 Flag：判错误且不计分
         self.assertIn("本队靶机", self.post(other, f"{page}/flag", flag=values[team_b][2], follow=True, code=200).get_data(as_text=True))
@@ -862,22 +869,26 @@ class PlatformTest(unittest.TestCase):
         sql_id, admin_id = (row["id"] for row in self.lookup(
             "SELECT id FROM target_flags WHERE puzzle_id = ? ORDER BY id", (multi_id,)))
         self.post(other, f"{page}/flag", flag=derived(multi_id, team_a, sql_id))
+        split = self.post(other, f"{page}/flag", flag=derived(multi_id, team_c, admin_id), follow=True, code=200).get_data(as_text=True)
+        self.assertIn("取自队伍「NightOwl」的靶机", split)
+        self.assertIn("已获取 2/4 枚", split)
+        self.assertNotIn(">被攻破</span>", split)
         middle = self.post(other, f"{page}/flag", flag=derived(multi_id, team_a, admin_id), follow=True, code=200).get_data(as_text=True)
         self.assertIn("已攻破 1/2 队", middle)
+        self.assertEqual(middle.count(">被攻破</span>"), 1)
         self.assertIn('name="flag"', middle)
-        rival_hit = self.post(other, f"{page}/flag", flag=derived(multi_id, team_c, sql_id), follow=True, code=200).get_data(as_text=True)
-        self.assertIn("取自队伍「NightOwl」的靶机", rival_hit)
-        self.assertIn("已攻破 1/2 队", rival_hit)
-        final = self.post(other, f"{page}/flag", flag=derived(multi_id, team_c, admin_id), follow=True, code=200).get_data(as_text=True)
-        self.assertIn("200 攻击积分", final)
+        self.assertEqual(third.get(page).get_data(as_text=True).count(">被攻破</span>"), 1)
+        final = self.post(other, f"{page}/flag", flag=derived(multi_id, team_c, sql_id), follow=True, code=200).get_data(as_text=True)
+        self.assertIn("100 攻击积分", final)
+        self.assertEqual(final.count(">被攻破</span>"), 2)
         self.assertIn("已攻破 2/2 队", final)
         self.assertEqual([tuple(row) for row in self.lookup("SELECT kind, delta, reason FROM score_events ORDER BY id")], [
             ("attack", 300, "攻破队伍「BlueFox」靶机「单点靶机」"),
             ("attack", 300, "攻破队伍「NightOwl」靶机「单点靶机」"),
             ("attack", 100, "攻破队伍「BlueFox」靶机「多点靶机」的靶点「SQL 注入拖库」"),
+            ("attack", 200, "攻破队伍「NightOwl」靶机「多点靶机」的靶点「拿下管理后台」"),
             ("attack", 200, "攻破队伍「BlueFox」靶机「多点靶机」的靶点「拿下管理后台」"),
             ("attack", 100, "攻破队伍「NightOwl」靶机「多点靶机」的靶点「SQL 注入拖库」"),
-            ("attack", 200, "攻破队伍「NightOwl」靶机「多点靶机」的靶点「拿下管理后台」"),
         ])
         arena = other.get("/awdp?view=tasks").get_data(as_text=True)
         self.assertEqual(arena.count("已攻破 2/2 队"), 2)
@@ -1047,18 +1058,25 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual([tuple(row) for row in self.lookup("SELECT puzzle_id, target_flag_id, verdict, points FROM flag_submissions")],
                          [(plain_id, None, "correct", 120)])
 
-        # 静态靶机布置两个静态靶点
-        self.post(self.admin, "/manage/bank/new", **base, points=300,
-                  flag_id=["", ""], flag_title=["靶点甲", "靶点乙"], flag_points=["100", "200"],
-                  flag_value=["flag{a}", "flag{b}"], flag_description=["提示甲", ""])
+        # 静态靶机的各靶点必须使用不同的 Flag。
+        rows = {"flag_id": ["", ""], "flag_title": ["靶点甲", "靶点乙"], "flag_points": ["100", "200"],
+                "flag_description": ["提示甲", ""]}
+        duplicate = self.post(self.admin, "/manage/bank/new", **base, **rows, points=300,
+                              flag_value=["flag{a}", " flag{a} "], code=400)
+        self.assertIn("与第 1 行靶点重复", duplicate.get_data(as_text=True))
+        self.assertEqual(self.lookup("SELECT COUNT(*) FROM target_flags")[0][0], 0)
+        self.post(self.admin, "/manage/bank/new", **base, **rows, points=300, flag_value=["flag{a}", "flag{b}"])
         target_id = self.lookup("SELECT id FROM puzzles WHERE title = '靶点靶机'")[0][0]
         saved = self.lookup(
             "SELECT id, title, points, description, flag_digest FROM target_flags WHERE puzzle_id = ? ORDER BY id", (target_id,))
         self.assertEqual([(row["title"], row["points"], row["description"]) for row in saved],
                          [("靶点甲", 100, "提示甲"), ("靶点乙", 200, "")])
         self.assertTrue(all(row["flag_digest"] for row in saved))
-        # 编辑：改名、改分值且 Flag 留空保留原值；未提交的行被删除
         form = {key: base[key] for key in ("title", "category", "difficulty", "description", "kind", "published")}
+        duplicate = self.post(self.admin, f"/manage/bank/{target_id}/edit", **form, points=300,
+                              **{**rows, "flag_id": [str(row["id"]) for row in saved]}, flag_value=["", "flag{a}"], code=400)
+        self.assertIn("与第 1 行靶点重复", duplicate.get_data(as_text=True))
+        # 编辑：改名、改分值且 Flag 留空保留原值；未提交的行被删除
         self.post(self.admin, f"/manage/bank/{target_id}/edit", **form, points=300, flag_id=[str(saved[0]["id"])],
                   flag_title=["靶点甲·改"], flag_points=["150"], flag_value=[""], flag_description=["提示甲"])
         self.assertEqual([tuple(row) for row in self.lookup(
@@ -1083,6 +1101,43 @@ class PlatformTest(unittest.TestCase):
             "SELECT target_flag_id, verdict, points FROM flag_submissions WHERE puzzle_id = ? ORDER BY id", (target_id,))],
             [(None, "incorrect", 0), (None, "correct", 300)])
         self.assertEqual([row[0] for row in self.lookup("SELECT delta FROM score_events ORDER BY id")], [120, 150, 300])
+
+    def test_awdp_static_target_progress_uses_its_own_flags(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest(mode="round")
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        other, other_id = self.player(contest_id, "packetlab", "PacketLab")
+        self.player(contest_id, "nightowl", "NightOwl")
+        target_id = self.awdp_target(contest_id, env_image="nginx:alpine", flags=[("靶点甲", 100, ""), ("靶点乙", 200, "")])
+        page = f"/awdp/targets/{target_id}"
+        board = "/awdp?view=tasks"
+        flags = self.lookup("SELECT id FROM target_flags WHERE puzzle_id = ? ORDER BY id", (target_id,))
+        env = self.lookup("SELECT id, secret FROM breach_environments WHERE puzzle_id = ? AND team_id = ?",
+                          (target_id, other_id))[0]
+        # 切换成静态 Flag 后，原来按对手计分的提交保留积分，但不计入当前靶点进度。
+        self.post(player, f"{page}/flag", flag=env_flag_value(env["secret"], env["id"], flags[0]["id"], kind="target"))
+        self.post(self.admin, f"/manage/bank/{target_id}/edit", title="镜像靶场", category="Web", difficulty="进阶",
+                  description="AWDP 攻防靶机", kind="round", published="1", points=300,
+                  flag_id=[str(row["id"]) for row in flags], flag_title=["靶点甲", "靶点乙"], flag_points=["100", "200"],
+                  flag_value=["flag{a}", "flag{b}"], flag_description=["", ""])
+
+        first = self.post(player, f"{page}/flag", flag="flag{b}", follow=True, code=200).get_data(as_text=True)
+        self.assertIn("200 攻击积分", first)
+        self.assertNotIn(">被攻破</span>", first)
+        self.assertIn(">已获取 1/2 枚</span>", player.get(board).get_data(as_text=True))
+        repeat = self.post(player, f"{page}/flag", flag="flag{b}", follow=True, code=200).get_data(as_text=True)
+        self.assertIn("本队已经获得该靶点积分", repeat)
+        self.assertNotIn(">被攻破</span>", repeat)
+
+        final = self.post(player, f"{page}/flag", flag="flag{a}", follow=True, code=200).get_data(as_text=True)
+        self.assertIn("100 攻击积分", final)
+        self.assertIn(">被攻破</span>", final)
+        self.assertIn("靶机状态为「被攻破」", final)
+        self.assertIn(">被攻破</span>", player.get(board).get_data(as_text=True))
+        self.assertNotIn(">被攻破</span>", other.get(board).get_data(as_text=True))
+        self.assertEqual([row[0] for row in self.lookup(
+            "SELECT delta FROM score_events WHERE team_id = ? ORDER BY id", (team_id,))], [100, 200, 100])
 
     def test_dynamic_flag_with_non_ascii_characters_is_judged_not_crashing(self):
         """三种模式的动态环境提交含非 ASCII 字符的 Flag：判错并留痕，不报服务器错误。"""

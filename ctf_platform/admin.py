@@ -2,6 +2,7 @@ import csv
 import io
 import re
 import sqlite3
+from hmac import compare_digest
 
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import generate_password_hash
@@ -9,7 +10,8 @@ from werkzeug.security import generate_password_hash
 from .db import get_db, transaction
 from .domain import (
     CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, DIFFICULTIES, PATCH_STATES, SCORE_KINDS, SERVICE_STATES, FormError, admin_required,
-    choice_field, contest_state, integer_field, new_flag, parse_local_time, text_field, username_value, validate_password,
+    choice_field, contest_state, flag_digest, integer_field, new_flag, parse_local_time, text_field, username_value,
+    validate_password,
 )
 from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix, target_flags
 from .range import RangeError, probe_image, stop_environment
@@ -816,19 +818,19 @@ def bank_edit(task_id):
             raise FormError("环境镜像名须为合法镜像引用（字母、数字与 . _ : / - 组成）。")
         env_container_port = integer_field("env_container_port", "容器端口", 1, 65535)
     flag = text_field("flag", "Flag", 256, optional=True)
-    # AWDP 靶机可布置多个靶点（每靶点一枚独立 Flag）；未布置靶点时沿用靶机级 Flag
-    flag_rows = target_flag_rows(puzzle_id=task_id, dynamic=bool(env_image)) if kind == "round" else []
-    if flag_rows and flag:
-        raise FormError("已布置靶点的靶机按靶点计分，请将靶机级 Flag 留空。")
-    if not task and not flag and not env_image and not flag_rows:
-        raise FormError("请填写 Flag；或在填写环境镜像后留空以按队伍动态生成。")
-    if not env_image and task and not flag and not task["flag_digest"] and not flag_rows:
-        raise FormError("该赛题当前为动态环境赛题，请保留环境镜像或改填固定 Flag。")
-    salt_and_digest = new_flag(flag) if flag else (("", "") if flag_rows or (env_image and not task) else None)
     uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
     remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
-    previous_layout = target_layout(db, task_id) if task and kind == "round" else None
     with transaction(db, write=True):
+        # 读取保留的靶点 Flag、校验并保存都在同一次写事务中完成。
+        flag_rows = target_flag_rows(puzzle_id=task_id, dynamic=bool(env_image)) if kind == "round" else []
+        if flag_rows and flag:
+            raise FormError("已布置靶点的靶机按靶点计分，请将靶机级 Flag 留空。")
+        if not task and not flag and not env_image and not flag_rows:
+            raise FormError("请填写 Flag；或在填写环境镜像后留空以按队伍动态生成。")
+        if not env_image and task and not flag and not task["flag_digest"] and not flag_rows:
+            raise FormError("该赛题当前为动态环境赛题，请保留环境镜像或改填固定 Flag。")
+        salt_and_digest = new_flag(flag) if flag else (("", "") if flag_rows or (env_image and not task) else None)
+        previous_layout = target_layout(db, task_id) if task and kind == "round" else None
         if join_contest:
             contest_row = db.execute("SELECT mode FROM contests WHERE id = ?", (join_contest,)).fetchone()
             if not contest_row:
@@ -862,11 +864,12 @@ def bank_edit(task_id):
             db.execute("DELETE FROM puzzle_files WHERE puzzle_id = ? AND file_id = ?", (task_id, file_id))
         for upload in uploads:
             db.execute("INSERT INTO puzzle_files VALUES (?, ?)", (task_id, save_upload(db, upload, g.now)))
+        layout_changed = previous_layout is not None and target_layout(db, task_id) != previous_layout
     if join_contest and kind == "round" and env_image:
         # 比赛中新建靶机：随即为全场队伍补启该靶机环境
         spawn_autostart(current_app, join_contest)
     message = f"{unit}已保存"
-    if previous_layout is not None and target_layout(db, task_id) != previous_layout and restart_target_environments(db, task_id):
+    if layout_changed and restart_target_environments(db, task_id):
         # 镜像、容器端口或靶点有变动：运行中的容器不会重新注入 Flag，为全部队伍重启该靶机
         message += "；镜像或靶点有变动，正在为全部队伍重启该靶机以注入新的 Flag"
     if join_contest:
@@ -913,6 +916,8 @@ def target_flag_rows(*, puzzle_id, dynamic):
     existing = {row["id"]: row for row in get_db().execute(
         "SELECT id, flag_salt, flag_digest FROM target_flags WHERE puzzle_id = ?", (puzzle_id,)).fetchall()} if puzzle_id else {}
     rows = []
+    entered_values = {}
+    retained_flags = {}
     for index in range(count):
         raw_id = ids[index].strip() if index < len(ids) else ""
         title = titles[index].strip() if index < len(titles) else ""
@@ -943,13 +948,21 @@ def target_flag_rows(*, puzzle_id, dynamic):
                 raise FormError(f"{label}的 Flag 须留空：已填写环境镜像的靶机，各队 Flag 由平台动态生成。")
             salt, digest = "", ""
         elif value:
+            if value in entered_values:
+                raise FormError(f"{label}的 Flag 与第 {entered_values[value]} 行靶点重复，请填写不同的 Flag。")
+            entered_values[value] = index + 1
             salt, digest = new_flag(value)
         elif flag_id and existing[flag_id]["flag_digest"]:
             salt, digest = existing[flag_id]["flag_salt"], existing[flag_id]["flag_digest"]
+            retained_flags[index + 1] = (salt, digest)
         else:
             raise FormError(f"请填写{label}的 Flag，或为靶机填写环境镜像启用动态 Flag。")
         rows.append({"id": flag_id, "title": title, "points": points, "description": description,
                      "flag_salt": salt, "flag_digest": digest})
+    for value, entered_line in entered_values.items():
+        for retained_line, (salt, digest) in retained_flags.items():
+            if compare_digest(digest, flag_digest(salt, value)):
+                raise FormError(f"第 {entered_line} 行靶点的 Flag 与第 {retained_line} 行靶点重复，请填写不同的 Flag。")
     return rows
 
 

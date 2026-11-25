@@ -71,7 +71,12 @@
             <td class="arena-number">{{ target.points }}{% if target.flag_total %}<br><small class="arena-muted">{{ target.flag_total }} 个靶点</small>{% endif %}</td>
             <td>{{ ui.pill("动态容器", "success") if target.has_env else ui.pill("静态 Flag", "neutral") }}</td>
             <td class="arena-number">{{ target.solves }}</td>
-            {% if g.team %}<td>{{ ui.pill(target.state[1], target.state[0]) }}</td>{% endif %}
+            {% if g.team %}
+            <td>
+              {{ ui.pill(target.state[1], target.state[0]) }}
+              {% if target.own_breached %}<br><small class="arena-muted">本队靶机</small> {{ ui.pill("被攻破", "error") }}{% endif %}
+            </td>
+            {% endif %}
             <td>{{ ui.link("进入靶机", url_for('site.round_target', target_id=target.id), "link", "next") }}</td>
           </tr>{% endfor %}</tbody>
         </table></div>

@@ -7,6 +7,7 @@
   {% endcall %}
   {% if target.env_image %}
     {% call ui.panel("靶机环境") %}
+      {% if own_breached %}<div class="arena-detail-copy"><p>本队靶机 {{ ui.pill("被攻破", "error") }}</p></div>{% endif %}
       {% if not g.team %}
         <div class="arena-detail-copy"><p>各队伍的靶机由平台在开赛后统一开启；加入比赛队伍后此处显示本队靶机地址。</p></div>
       {% elif not environment or environment.status == 'stopped' %}
@@ -39,16 +40,19 @@
       {% endif %}
       {% if rivals %}
         <section class="arena-attachments" aria-label="其他队伍靶机"><h3>其他队伍在线靶机</h3>
-          <p class="arena-muted">每支对手队伍各有一台靶机实例、Flag 互不相同：攻击对手靶机提取其全部 Flag 并提交即可获得攻击积分，攻破的对手越多积分越高；请勿破坏对手环境以外的平台服务。</p>
+          <p class="arena-muted">每支队伍各有一台靶机实例{% if per_team %}，Flag 互不相同{% endif %}。请勿破坏对手环境以外的平台服务。</p>
           <div class="arena-table-wrap"><table class="arena-table"><caption>在线对手</caption>
-            <thead><tr><th scope="col">队伍</th><th scope="col">靶机地址</th><th scope="col">本队进度</th></tr></thead>
+            <thead><tr><th scope="col">队伍</th><th scope="col">靶机地址</th>{% if per_team %}<th scope="col">本队提交进度</th><th scope="col">靶机状态</th>{% endif %}</tr></thead>
             <tbody>{% for rival in rivals %}<tr>
               <td><strong>{{ rival.team_name }}</strong></td>
               <td><a class="arena-mono" href="http://{{ environment_host }}:{{ rival.host_port }}" target="_blank" rel="noopener">http://{{ environment_host }}:{{ rival.host_port }}</a></td>
-              <td>{{ ui.pill(rival.state[1], rival.state[0]) }}</td>
+              {% if per_team %}
+                <td class="arena-number">{{ rival.obtained }}/{{ flag_total or 1 }} 枚</td>
+                <td>{{ ui.pill("被攻破", "error") if rival.breached else ui.pill("未攻破", "neutral") }}</td>
+              {% endif %}
             </tr>{% endfor %}</tbody>
           </table></div>
-          <p class="arena-muted">本队已攻破 {{ rival_breached }}/{{ rival_total }} 支对手队伍的这台靶机；全场已有 {{ solves }} 支队伍攻破过对手的这台靶机。</p>
+          {% if per_team %}<p class="arena-muted">本队已攻破 {{ rival_breached }}/{{ rival_total }} 支对手队伍的这台靶机。全场已有 {{ solves }} 支队伍攻破过对手的这台靶机。</p>{% endif %}
         </section>
       {% endif %}
     {% endcall %}
@@ -91,9 +95,11 @@
       <form class="arena-form" action="{{ url_for('site.submit_target_flag', target_id=target.id) }}" method="post">
         {{ ui.csrf() }}<label class="arena-field">Flag<input class="arena-input arena-mono" name="flag" type="text" placeholder="flag{…}" maxlength="256" spellcheck="false" autocomplete="off" required></label>
         <div class="arena-actions"><button class="arena-btn primary" type="submit">提交 Flag</button></div>
-        {% if flags %}
-        <small class="arena-muted">每台靶机的每个靶点各有一枚独立 Flag。提交从<b>其他队伍</b>靶机中提取的 Flag，平台自动识别取自哪支队伍、对应哪个靶点并计入该靶点分值；同一对手的同一靶点只计一次，攻破的对手越多、拿下的靶点越多，攻击积分越高（本队靶机的 Flag 不计分）。本队已从对手靶机获取 {{ flag_solved }}/{{ flag_total }} 个靶点。</small>
-        {% elif target.env_image %}
+        {% if flags and per_team %}
+        <small class="arena-muted">提交其他队伍靶机的正确 Flag 即可获得对应靶点积分。同一对手的同一靶点只计一次。</small>
+        {% elif flags %}
+        <small class="arena-muted">提交正确 Flag 即可获得对应靶点积分，每队每个靶点计分一次。</small>
+        {% elif per_team %}
         <small class="arena-muted">提交从<b>其他队伍</b>靶机中提取的 Flag 即可获得攻击积分；每攻破一支对手队伍的这台靶机计一次分，同一对手只计一次（本队靶机的 Flag 不计分）。</small>
         {% else %}
         <small class="arena-muted">提交正确的 Flag 即可获得攻击积分；本队每台靶机只计一次。</small>
@@ -119,11 +125,12 @@
     {% set correct = notice.verdict == 'correct' %}
     {% set repeated = notice.verdict == 'already_solved' %}
     {% set label = "Flag 正确" if correct else "Flag 错误" if not repeated else "该靶点已被本队攻破" if notice.title else "该靶机已被本队攻破" %}
-    {% set message = "本队获得 " ~ notice.points ~ " 攻击积分，积分已更新。" if correct
+    {% set message = "本队获得 " ~ notice.points ~ " 攻击积分，积分已更新。" ~ (" 靶机状态为「被攻破」。" if notice.breached else "") if correct
                       else "不能提交本队靶机的 Flag，请攻击其他队伍的靶机。" if notice.own_flag
                       else "答案未通过判定，请核对后重试。" if not repeated
-                      else "本队已经攻破「" ~ notice.victim ~ "」的这台靶机并获得过它的积分，请继续攻击其他对手或其他靶点。" if notice.victim
-                      else "本队已经获得该靶点积分。" if notice.title else "本队已经获得该靶机的攻击积分。" %}
+                      else "本队已经获得该靶点积分。" if notice.title
+                      else "本队已经攻破「" ~ notice.victim ~ "」的这台靶机并获得过它的积分，请继续攻击其他对手。" if notice.victim
+                      else "本队已经获得该靶机的攻击积分。" %}
     <dialog class="arena-dialog" data-auto-dialog aria-labelledby="flag-result-title">
       <header class="arena-dialog-head"><div><h2 id="flag-result-title">{{ label }}</h2><p>{{ target.title }}{% if notice.title %} · 靶点「{{ notice.title }}」{% endif %}{% if notice.victim %} · 取自队伍「{{ notice.victim }}」的靶机{% endif %}</p></div><form method="dialog"><button class="arena-btn" type="submit" aria-label="关闭弹窗">×</button></form></header>
       <div class="arena-dialog-body"><div class="arena-feedback arena-outcome {{ 'success' if correct else 'error' if notice.verdict == 'incorrect' else '' }}" role="status">{{ message }}</div>

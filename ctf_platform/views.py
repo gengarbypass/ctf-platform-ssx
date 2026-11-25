@@ -4,6 +4,7 @@ import secrets
 import sqlite3
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
@@ -834,14 +835,15 @@ def round_target(target_id):
     flags = [dict(flag) for flag in target_flags(db, target_id)]
     awards = target_awards(db, contest_id, [target_id])[target_id]
     breaches = target_breaches(awards, len(flags))
+    breached_teams = {victim for victims in breaches.values() for victim in victims if victim is not None}
+    team_breaches = breaches.get(team_id, set())
     mine = awards.get(team_id, set())
     # 动态靶机每支队伍各有一个实例：按攻破了几支对手队伍的靶机计进度；静态靶机没有对手实例，只看 Flag 是否拿全
-    per_team = bool(target["env_image"])
+    per_team = bool(target["env_image"] and not target["flag_digest"])
     rival_total = rival_count(db, contest_id, team_id) if per_team else 0
-    rival_breached = len(breaches.get(team_id, set()) - {None})
+    rival_breached = len(team_breaches - {None})
     for flag in flags:
         victims = {victim for flag_id, victim in mine if flag_id == flag["id"]}
-        flag["obtained"] = bool(victims)
         flag["solves"] = sum(any(flag_id == flag["id"] for flag_id, _ in obtained) for obtained in awards.values())
         flag["state"] = obtained_pill(len(victims), rival_total)
     state = attack_pill(rivals=rival_total, breached=rival_breached, flags=len(mine),
@@ -855,7 +857,7 @@ def round_target(target_id):
                 "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
                 (contest_id, team_id, target_id),
             ).fetchone()
-            # 其他队伍的在线靶机：攻击方据此访问对手容器提取 Flag；附本队攻下该台几个靶点的进度
+            # 其他队伍的在线靶机：展示本队提交进度及该实例是否已被完整攻破
             rivals = [dict(row) for row in db.execute(
                 """SELECT e.team_id, e.host_port, t.name AS team_name FROM breach_environments e
                    JOIN teams t ON t.id = e.team_id
@@ -864,16 +866,20 @@ def round_target(target_id):
                    ORDER BY e.host_port""",
                 (contest_id, target_id, team_id, g.now),
             ).fetchall()]
+            obtained_by_rival = Counter(victim for _, victim in mine)
             for rival in rivals:
-                obtained = sum(1 for _, victim in mine if victim == rival["team_id"])
-                rival["state"] = attack_pill(flags=obtained, need=len(flags) or 1)
+                rival["obtained"] = obtained_by_rival[rival["team_id"]]
+                rival["breached"] = rival["team_id"] in breached_teams
     notice = session.pop("flag_notice", None)
-    if notice and notice["puzzle_id"] != target_id:
-        notice = None
+    if notice:
+        if notice["puzzle_id"] != target_id:
+            notice = None
+        elif notice["verdict"] == "correct":
+            notice["breached"] = notice.get("victim_id") in team_breaches
     return render_template("target.html", title=target["title"], target=target, files=files, solves=len(breaches),
                            state=state, done=state[0] == "success", history=history, notice=notice,
                            environment=environment, rivals=rivals, flags=flags, flag_total=len(flags),
-                           flag_solved=sum(flag["obtained"] for flag in flags), per_team=per_team,
+                           own_breached=team_id in breached_teams, per_team=per_team,
                            rival_total=rival_total, rival_breached=rival_breached,
                            total_points=sum(flag["points"] for flag in flags) if flags else target["points"],
                            environment_host=environment_host() if target["env_image"] else "",
@@ -946,7 +952,7 @@ def submit_target_flag(target_id):
             add_score(db, contest_id=contest["id"], team_id=team["id"], kind="attack", delta=points,
                       round_no=max(1, contest_state(contest, now)["round"]), reason=reason, actor_id=g.user["id"], now=now)
     notice = {"puzzle_id": target_id, "verdict": verdict, "points": points, "own_flag": own_flag, "title": title,
-              "victim": victim_name}
+              "victim": victim_name, "victim_id": victim_id}
     session["flag_notice"] = notice
     return redirect(url_for("site.round_target", target_id=target_id), code=303)
 

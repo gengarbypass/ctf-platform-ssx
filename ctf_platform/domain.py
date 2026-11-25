@@ -178,7 +178,7 @@ def attack_pill(*, rivals=0, breached=0, flags=0, need=1):
     """AWDP 靶机攻击进度的药丸（色调, 文案）。
 
     rivals 为可攻击的对手队伍数：动态靶机每队各有一个实例，攻破几支队伍就显示几支，全部攻破才算已攻破；
-    rivals 为 0（静态靶机、单台对手靶机）或尚无整台被攻破时，按已获取的 Flag 数 flags 与总数 need 展示。
+    静态靶机按本队已获取的 Flag 数 flags 与总数 need 展示进度，全部获取后显示「被攻破」。
     """
     if rivals:
         if breached >= rivals:
@@ -186,7 +186,7 @@ def attack_pill(*, rivals=0, breached=0, flags=0, need=1):
         if breached:
             return "warning", f"已攻破 {breached}/{rivals} 队"
     elif flags >= need:
-        return "success", "已攻破"
+        return "success", "被攻破"
     if flags:
         return "warning", f"已获取 {flags}/{need} 枚"
     return "neutral", "未攻破"

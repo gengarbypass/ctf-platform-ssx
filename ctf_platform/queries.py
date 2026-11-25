@@ -162,14 +162,17 @@ def target_awards(db, contest_id, puzzle_ids):
     动态靶机各队实例的 Flag 互不相同，同一队攻破几支队伍的靶机，同一靶点就出现几次；
     静态 Flag 各队靶机相同、无从区分来源，被攻破队伍记为 None。未布置靶点的靶机没有靶点，靶点记为 None；
     靶机后来登记了靶点时，登记前留下的靶机级记录不再计入进度（积分保留在计分流水）。
+    进度按当前 Flag 类型计算，动态实例只统计能确定来源队伍的提交。
     """
     awards = {puzzle_id: {} for puzzle_id in puzzle_ids}
     if not puzzle_ids:
         return awards
     placeholders = ",".join("?" * len(puzzle_ids))
     for row in db.execute(
-        f"""SELECT f.puzzle_id, f.team_id, f.target_flag_id, f.victim_team_id FROM flag_submissions f
+        f"""SELECT f.puzzle_id, f.team_id, f.target_flag_id, f.victim_team_id
+            FROM flag_submissions f JOIN puzzles p ON p.id = f.puzzle_id
             WHERE f.contest_id = ? AND f.verdict = 'correct' AND f.puzzle_id IN ({placeholders})
+              AND (f.victim_team_id IS NOT NULL) = (p.env_image IS NOT NULL AND p.flag_digest = '')
               AND (f.target_flag_id IS NOT NULL
                    OR NOT EXISTS (SELECT 1 FROM target_flags tf WHERE tf.puzzle_id = f.puzzle_id))""",
         (contest_id, *puzzle_ids),
@@ -216,6 +219,7 @@ def round_targets(db, contest_id, team_id=None):
     """
     rows = [dict(row) for row in db.execute(
         """SELECT p.id, p.title, p.points, (p.env_image IS NOT NULL) AS has_env,
+                  (p.env_image IS NOT NULL AND p.flag_digest = '') AS per_team,
                   EXISTS(SELECT 1 FROM puzzle_files a WHERE a.puzzle_id = p.id) AS attached,
                   (SELECT COUNT(*) FROM target_flags tf WHERE tf.puzzle_id = p.id) AS flag_total,
                   (SELECT COALESCE(SUM(tf.points), 0) FROM target_flags tf WHERE tf.puzzle_id = p.id) AS flag_points
@@ -229,13 +233,15 @@ def round_targets(db, contest_id, team_id=None):
     for row in rows:
         breaches = target_breaches(awards[row["id"]], row["flag_total"])
         row["solves"] = len(breaches)
+        row["own_breached"] = row["per_team"] and any(team_id in victims for victims in breaches.values())
         if row["flag_total"]:
             row["points"] = row["flag_points"]
+        target_rivals = rivals if row["per_team"] else 0
         row["state"] = attack_pill(
             # 动态靶机按攻破的对手队伍数计；静态靶机没有对手实例，按 Flag 是否全部拿到计
-            rivals=rivals if row["has_env"] else 0,
+            rivals=target_rivals,
             breached=len(breaches.get(team_id, set()) - {None}),
-            flags=len(awards[row["id"]].get(team_id, set())), need=(row["flag_total"] or 1) * (rivals or 1),
+            flags=len(awards[row["id"]].get(team_id, set())), need=(row["flag_total"] or 1) * (target_rivals or 1),
         )
     return rows
 
