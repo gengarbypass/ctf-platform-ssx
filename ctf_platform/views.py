@@ -5,7 +5,8 @@ import sqlite3
 import threading
 import time
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import closing
 
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
@@ -280,8 +281,7 @@ def environment_host():
 
 
 _autostart_guard = threading.Lock()
-# 比赛 ID -> {"running": 是否有一轮在执行, "again": 本轮结束后是否还需再跑一轮, "restart": 待重启的靶机 ID}
-_autostart_state = {}
+AWDP_RETRY_SECONDS = 5
 
 
 def round_env_targets(db, contest_id):
@@ -293,113 +293,125 @@ def round_env_targets(db, contest_id):
     ).fetchall()
 
 
-def missing_round_environments(db, contest_id, targets):
-    """统计缺少运行环境的「队伍 × 靶机」组合数（每对唯一，按行数即组合数）。"""
-    placeholders = ",".join("?" * len(targets))
-    covered = db.execute(
-        f"""SELECT COUNT(*) FROM breach_environments WHERE contest_id = ? AND puzzle_id IN ({placeholders})
-           AND status IN ('starting', 'running')""",
-        (contest_id, *[target["id"] for target in targets]),
-    ).fetchone()[0]
-    teams = db.execute("SELECT COUNT(*) FROM contest_teams WHERE contest_id = ?", (contest_id,)).fetchone()[0]
-    return teams * len(targets) - covered
+def sync_round_environments(app, db, contest, state, now):
+    """有缺失的实例或新回合待注入时，唤醒 AWDP 靶机维护。"""
+    if not contest or contest["mode"] != "round" or state["status"] != "live":
+        return
+    if db.execute(
+        """SELECT 1 FROM contest_puzzles cp JOIN puzzles p ON p.id = cp.puzzle_id
+           JOIN contest_teams ct ON ct.contest_id = cp.contest_id
+           LEFT JOIN breach_environments e ON e.contest_id = cp.contest_id
+                AND e.puzzle_id = cp.puzzle_id AND e.team_id = ct.team_id
+           WHERE cp.contest_id = ? AND p.kind = 'round' AND p.published = 1 AND p.env_image IS NOT NULL
+             AND (e.id IS NULL OR e.restart_requested = 1 OR e.expires_at IS NOT ?
+                  OR e.flag_round IS NOT CASE WHEN p.flag_digest = '' THEN ? ELSE 0 END
+                  OR (e.status != 'running' AND (e.status != 'error' OR COALESCE(e.stopped_at, 0) <= ?)))
+           LIMIT 1""", (contest["id"], contest["end_at"], state["round"], now - AWDP_RETRY_SECONDS),
+    ).fetchone():
+        spawn_autostart(app, contest["id"])
 
 
-def autostart_round_targets(app, contest_id, restart=frozenset()):
-    """为全部队伍启动所有已发布靶机容器：整场运行（到期=比赛结束）、幂等可重入、失败按环境行记录。
-
-    restart 中的靶机连同已在运行的环境一并重启（换新端口、重建容器），用于 Flag 布局变动后重新注入。
-    """
-    with app.app_context():
-        db = connect(app.config["DATABASE"])
+def autostart_round_targets(app, contest_id):
+    """补齐靶机、应用重启请求并注入本回合 Flag。"""
+    # 独立的 SQLite 锁串行化 Gunicorn 进程的 Docker 操作，主库在容器启动期间可正常写入。
+    with app.app_context(), closing(sqlite3.connect(app.config["DATABASE"] + ".awdp-lock", timeout=0)) as lock:
         try:
-            contest = db.execute("SELECT * FROM contests WHERE id = ?", (contest_id,)).fetchone()
-            if contest is None or contest_state(contest, int(time.time()))["status"] == "upcoming":
+            lock.execute("BEGIN EXCLUSIVE")
+        except sqlite3.OperationalError as error:
+            if error.sqlite_errorcode in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
                 return
-            targets = round_env_targets(db, contest_id)
-            teams = team_list(db, contest_id)
-            if not targets or not teams:
-                return
-            now = int(time.time())
-            pending = []
-            for team in teams:
-                for target in targets:
-                    env = db.execute(
-                        "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
-                        (contest_id, team["id"], target["id"]),
-                    ).fetchone()
-                    try:
-                        with transaction(db, write=True):
-                            if env and env["status"] in ("starting", "running") and target["id"] not in restart:
-                                # 已在运行：把到期时间统一续到比赛结束
+            raise
+        with closing(connect(app.config["DATABASE"])) as db:
+            with transaction(db, write=True):
+                now = int(time.time())
+                contest = db.execute(
+                    "SELECT * FROM contests WHERE id = ? AND active = 1 AND mode = 'round'", (contest_id,),
+                ).fetchone()
+                state = contest_state(contest, now)
+                if not state or state["status"] != "live":
+                    return
+                round_no = state["round"]
+                teams = team_list(db, contest_id)
+                environments = {(row["puzzle_id"], row["team_id"]): row for row in db.execute(
+                    "SELECT * FROM breach_environments WHERE contest_id = ?", (contest_id,),
+                )}
+                pending = []
+                for target in round_env_targets(db, contest_id):
+                    flag_round = round_no if not target["flag_digest"] else 0
+                    flag_ids = [flag["id"] for flag in target_flags(db, target["id"])]
+                    for team in teams:
+                        env = environments.get((target["id"], team["id"]))
+                        if env and env["flag_round"] == flag_round and not env["restart_requested"]:
+                            if env["status"] == "running":
                                 if env["expires_at"] != contest["end_at"]:
                                     db.execute("UPDATE breach_environments SET expires_at = ? WHERE id = ?",
                                                (contest["end_at"], env["id"]))
                                 continue
-                            # 重启补启同样换新端口（永不复用历史端口）
-                            port = allocate_environment_port(db)
-                            if env:
-                                db.execute(
-                                    """UPDATE breach_environments SET status = 'starting', last_error = '',
-                                       host_port = ?, expires_at = ?, container_id = '', network_id = '' WHERE id = ?""",
-                                    (port, contest["end_at"], env["id"]),
-                                )
-                                env_id, secret = env["id"], env["secret"]
-                            else:
-                                secret = secrets.token_hex(32)
-                                env_id = db.execute(
-                                    """INSERT INTO breach_environments
-                                       (contest_id, team_id, puzzle_id, secret, host_port, status, created_at, expires_at)
-                                       VALUES (?, ?, ?, ?, ?, 'starting', ?, ?)""",
-                                    (contest_id, team["id"], target["id"], secret, port, now, contest["end_at"]),
-                                ).lastrowid
-                    except sqlite3.IntegrityError:
-                        continue  # 多进程并发触发：该环境已由其他进程建立，交给下一轮补齐
-                    pending.append((env_id, secret, port, team, target))
+                            if env["status"] == "error" and (env["stopped_at"] or 0) > now - AWDP_RETRY_SECONDS:
+                                continue
+                        if env:
+                            port = env["host_port"]
+                            if not port or env["restart_requested"] or env["status"] == "stopped":
+                                port = allocate_environment_port(db)
+                            env_id, secret = env["id"], env["secret"]
+                            db.execute(
+                                """UPDATE breach_environments SET status = 'starting', last_error = '',
+                                   flag_round = ?, host_port = ?, expires_at = ?, restart_requested = 0,
+                                   container_id = '', network_id = '' WHERE id = ?""",
+                                (flag_round, port, contest["end_at"], env_id),
+                            )
+                        else:
+                            port, secret = allocate_environment_port(db), secrets.token_hex(32)
+                            env_id = db.execute(
+                                """INSERT INTO breach_environments
+                                   (contest_id, team_id, puzzle_id, secret, flag_round, host_port, created_at, expires_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (contest_id, team["id"], target["id"], secret, flag_round, port, now, contest["end_at"]),
+                            ).lastrowid
+                        flag_env = target_flag_env(target["id"], flag_ids, secret, env_id, round_no=flag_round)
+                        pending.append((env_id, port, team, target, flag_env))
             if not pending:
                 return
-            # 靶点归属须在进入线程池前取出：数据库连接不能跨线程使用
-            flag_ids = {target["id"]: [flag["id"] for flag in target_flags(db, target["id"])] for target in targets}
 
             def launch(item):
-                env_id, secret, port, team, target = item
-                flag_env = target_flag_env(target["id"], flag_ids[target["id"]], secret, env_id)
+                _, port, team, target, flag_env = item
                 try:
                     with app.app_context():
                         container_id, network_id = start_environment(
-                            contest=contest, team=team, image=target["env_image"],
-                            container_port=target["env_container_port"], host_port=port,
-                            flag_env=flag_env, puzzle_id=target["id"],
+                            contest=contest, team=team, image=target["env_image"], host_port=port,
+                            container_port=target["env_container_port"], flag_env=flag_env, puzzle_id=target["id"],
                         )
                 except RangeError as error:
-                    return env_id, "error", "", "", str(error)
-                return env_id, "running", container_id, network_id, ""
+                    return "", "", str(error)
+                return container_id, network_id, ""
 
             with ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
-                for env_id, status, container_id, network_id, error in pool.map(launch, pending):
+                launches = {pool.submit(launch, item): item for item in pending}
+                for future in as_completed(launches):
+                    env_id, _, team, target, _ = launches[future]
+                    container_id, network_id, error = future.result()
+                    finished = int(time.time())
                     with transaction(db, write=True):
-                        if status == "running":
+                        if error:
                             db.execute(
-                                """UPDATE breach_environments SET status = 'running', container_id = ?,
-                                   network_id = ?, started_at = ? WHERE id = ?""",
-                                (container_id, network_id, now, env_id),
+                                """UPDATE breach_environments SET status = 'error', last_error = ?, stopped_at = ?
+                                   WHERE id = ? AND status = 'starting'""", (error, finished, env_id),
                             )
-                        else:
-                            db.execute(
-                                "UPDATE breach_environments SET status = 'error', last_error = ?, stopped_at = ? WHERE id = ?",
-                                (error, now, env_id),
-                            )
-        finally:
-            db.close()
+                            continue
+                        updated = db.execute(
+                            """UPDATE breach_environments SET status = 'running', container_id = ?, network_id = ?, started_at = ?
+                               WHERE id = ? AND status = 'starting'""", (container_id, network_id, finished, env_id),
+                        ).rowcount
+                    if not updated:
+                        stop_environment(contest_id, team["id"], target["id"], container_id=container_id)
 
 
-def spawn_autostart(app, contest_id, restart=()):
-    """后台补齐全场靶机，restart 中的靶机连同已在运行的一并重启；TESTING 下同步执行以保证测试确定性，运行中防重入。"""
+def spawn_autostart(app, contest_id):
+    """后台维护全场靶机，测试时同步执行。"""
     # current_app 是线程绑定的代理，跨线程前解出真实应用对象
     app = app._get_current_object() if hasattr(app, "_get_current_object") else app
     with _autostart_guard:
-        state = _autostart_state.setdefault(contest_id, {"running": False, "again": False, "restart": set()})
-        state["restart"].update(restart)
+        state = app.extensions.setdefault("awdp_autostart", {}).setdefault(contest_id, {"running": False, "again": False})
         if state["running"]:
             state["again"] = True  # 已有一轮在执行：结束后带着这次的重启请求再跑一轮
             return
@@ -409,15 +421,15 @@ def spawn_autostart(app, contest_id, restart=()):
         try:
             while True:
                 with _autostart_guard:
-                    pending, state["restart"], state["again"] = frozenset(state["restart"]), set(), False
-                autostart_round_targets(app, contest_id, pending)
+                    state["again"] = False
+                autostart_round_targets(app, contest_id)
                 with _autostart_guard:
-                    if not (state["again"] or state["restart"]):
+                    if not state["again"]:
                         state["running"] = False
                         return
         except BaseException:
             with _autostart_guard:
-                state.update(running=False, again=False, restart=set())
+                state.update(running=False, again=False)
             raise
 
     if app.config.get("TESTING"):
@@ -440,9 +452,46 @@ def restart_target_environments(db, puzzle_id):
         contest = db.execute("SELECT * FROM contests WHERE id = ?", (row["contest_id"],)).fetchone()
         if contest and contest_state(contest, now)["status"] == "live":
             contest_ids.append(contest["id"])
+    if contest_ids:
+        with transaction(db, write=True):
+            db.executemany(
+                "UPDATE breach_environments SET restart_requested = 1 WHERE contest_id = ? AND puzzle_id = ?",
+                [(contest_id, puzzle_id) for contest_id in contest_ids],
+            )
     for contest_id in contest_ids:
-        spawn_autostart(current_app, contest_id, restart={puzzle_id})
+        spawn_autostart(current_app, contest_id)
     return contest_ids
+
+
+def sync_active_awdp(app):
+    with closing(connect(app.config["DATABASE"])) as db:
+        now = int(time.time())
+        contest = db.execute("SELECT * FROM contests WHERE active = 1 AND mode = 'round'").fetchone()
+        sync_round_environments(app, db, contest, contest_state(contest, now), now)
+
+
+def start_awdp_scheduler(app):
+    if app.testing:
+        return
+    with _autostart_guard:
+        if app.extensions.get("awdp_scheduler"):
+            return
+        app.extensions["awdp_scheduler"] = True
+
+    def run():
+        while True:
+            try:
+                sync_active_awdp(app)
+            except Exception:
+                app.logger.exception("AWDP 靶机调度失败")
+            time.sleep(1)
+
+    threading.Thread(target=run, name="awdp-scheduler", daemon=True).start()
+
+
+@site.before_app_request
+def ensure_awdp_scheduler():
+    start_awdp_scheduler(current_app._get_current_object())
 
 
 def allocate_environment_port(db):
@@ -526,7 +575,7 @@ def breach():
 
 
 def ensure_environment_row(db, *, contest, team, puzzle_id, now):
-    """事务内确保环境记录并置为待启动；已在运行返回 None，否则返回 (env_id, secret, host_port)。"""
+    """为解题或综合靶场预约启动，已在运行时返回 None。"""
     env = db.execute(
         "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
         (contest["id"], team["id"], puzzle_id),
@@ -734,21 +783,17 @@ def awdp():
         db = get_db()
         contest_id = g.contest["id"]
         team_id = g.team["id"] if g.team else None
+        sync_round_environments(current_app, db, g.contest, g.match, g.now)
         state = service_matrix(db, contest_id) if g.match["status"] != "upcoming" else None
         data = {
             "matrix": state,
             "tasks": state["tasks"] if state else [],
-            "targets": round_targets(db, contest_id, team_id),
+            "targets": round_targets(db, contest_id, team_id, round_no=g.match["round"]),
             "events": score_records(db, contest_id, team_id=team_id, limit=10),
             "trend": round_trend(db, contest_id, team_id, g.match["round"]),
             "patches": patch_records(db, contest_id, team_id=team_id, limit=10) if team_id else [],
             "standings": round_rankings(db, contest_id),
         }
-        # 开赛后补齐全场靶机：新加入的队伍/靶机也会在此自动补启
-        if g.match["status"] != "upcoming":
-            env_targets = round_env_targets(db, contest_id)
-            if env_targets and missing_round_environments(db, contest_id, env_targets) > 0:
-                spawn_autostart(current_app, contest_id)
     return render_template("awdp.html", title="AWDP", view=view, data=data)
 
 
@@ -808,16 +853,16 @@ def target_context(db, target_id):
     return contest, team, task, now
 
 
-def target_flag_env(target_id, flag_ids, secret, env_id):
+def target_flag_env(target_id, flag_ids, secret, env_id, *, round_no):
     """AWDP 靶机容器的 Flag 环境变量（按队派生）。
 
     布置了靶点：FLAG_1…FLAG_N 按靶点顺序各注入一枚独立 Flag，另附与 FLAG_1 同值的 FLAG 以兼容只读 FLAG 的镜像；
     未布置靶点：FLAG 与 FLAG_<靶机ID> 同值（靶机级单枚 Flag）。
     """
     if not flag_ids:
-        derived = env_flag_value(secret, env_id, target_id)
+        derived = env_flag_value(secret, env_id, target_id, round_no=round_no)
         return {"FLAG": derived, f"FLAG_{target_id}": derived}
-    values = [env_flag_value(secret, env_id, flag_id, kind="target") for flag_id in flag_ids]
+    values = [env_flag_value(secret, env_id, flag_id, kind="target", round_no=round_no) for flag_id in flag_ids]
     return {"FLAG": values[0], **{f"FLAG_{index}": value for index, value in enumerate(values, start=1)}}
 
 
@@ -833,7 +878,7 @@ def round_target(target_id):
            WHERE a.puzzle_id = ? ORDER BY f.id""", (target_id,),
     ).fetchall()
     flags = [dict(flag) for flag in target_flags(db, target_id)]
-    awards = target_awards(db, contest_id, [target_id])[target_id]
+    awards = target_awards(db, contest_id, [target_id], round_no=g.match["round"])[target_id]
     breaches = target_breaches(awards, len(flags))
     breached_teams = {victim for victims in breaches.values() for victim in victims if victim is not None}
     team_breaches = breaches.get(team_id, set())
@@ -850,6 +895,7 @@ def round_target(target_id):
                         need=(len(flags) or 1) * (rival_total or 1))
     history = flag_records(db, contest_id, team_id=team_id, puzzle_id=target_id, limit=20) if team_id else []
     environment = rivals = None
+    refreshing = False
     if target["env_image"]:
         sweep_environments(db, g.now)
         if g.team:
@@ -857,14 +903,19 @@ def round_target(target_id):
                 "SELECT * FROM breach_environments WHERE contest_id = ? AND team_id = ? AND puzzle_id = ?",
                 (contest_id, team_id, target_id),
             ).fetchone()
+            flag_round = g.match["round"] if per_team else 0
+            refreshing = bool(environment and g.match["status"] == "live" and (
+                environment["restart_requested"] or environment["flag_round"] != flag_round
+            ))
             # 其他队伍的在线靶机：展示本队提交进度及该实例是否已被完整攻破
             rivals = [dict(row) for row in db.execute(
                 """SELECT e.team_id, e.host_port, t.name AS team_name FROM breach_environments e
                    JOIN teams t ON t.id = e.team_id
                    WHERE e.contest_id = ? AND e.puzzle_id = ? AND e.team_id != ?
-                   AND e.status = 'running' AND (e.expires_at IS NULL OR e.expires_at > ?)
+                   AND e.status = 'running' AND e.flag_round = ? AND e.restart_requested = 0
+                   AND (e.expires_at IS NULL OR e.expires_at > ?)
                    ORDER BY e.host_port""",
-                (contest_id, target_id, team_id, g.now),
+                (contest_id, target_id, team_id, flag_round, g.now),
             ).fetchall()]
             obtained_by_rival = Counter(victim for _, victim in mine)
             for rival in rivals:
@@ -872,13 +923,13 @@ def round_target(target_id):
                 rival["breached"] = rival["team_id"] in breached_teams
     notice = session.pop("flag_notice", None)
     if notice:
-        if notice["puzzle_id"] != target_id:
+        if notice["puzzle_id"] != target_id or notice.get("flag_round", 0) not in (0, g.match["round"]):
             notice = None
         elif notice["verdict"] == "correct":
             notice["breached"] = notice.get("victim_id") in team_breaches
     return render_template("target.html", title=target["title"], target=target, files=files, solves=len(breaches),
                            state=state, done=state[0] == "success", history=history, notice=notice,
-                           environment=environment, rivals=rivals, flags=flags, flag_total=len(flags),
+                           environment=environment, refreshing=refreshing, rivals=rivals, flags=flags, flag_total=len(flags),
                            own_breached=team_id in breached_teams, per_team=per_team,
                            rival_total=rival_total, rival_breached=rival_breached,
                            total_points=sum(flag["points"] for flag in flags) if flags else target["points"],
@@ -895,19 +946,22 @@ def submit_target_flag(target_id):
     title = victim_name = ""
     with transaction(db, write=True):
         contest, team, target, now = target_context(db, target_id)
+        round_no = contest_state(contest, now)["round"]
+        flag_round = round_no if target["env_image"] and not target["flag_digest"] else 0
         attempts = db.execute(
             "SELECT COUNT(*) FROM flag_submissions WHERE contest_id = ? AND team_id = ? AND submitted_at >= ?",
             (contest["id"], team["id"], now - 60),
         ).fetchone()[0]
         if attempts >= 30:
             abort(429)
-        # 动态靶机：比对全部队伍在线环境的派生 Flag，命中哪支队伍的环境即记为攻破该队伍的靶机
+        # 只接收已完成本回合注入的动态 Flag。
         rivals = db.execute(
             """SELECT e.*, t.name AS team_name FROM breach_environments e JOIN teams t ON t.id = e.team_id
                WHERE e.contest_id = ? AND e.puzzle_id = ?
-               AND e.status = 'running' AND (e.expires_at IS NULL OR e.expires_at > ?)""",
-            (contest["id"], target_id, now),
-        ).fetchall() if target["env_image"] else []
+               AND e.status = 'running' AND e.flag_round = ? AND e.restart_requested = 0
+               AND (e.expires_at IS NULL OR e.expires_at > ?)""",
+            (contest["id"], target_id, flag_round, now),
+        ).fetchall() if flag_round else []
         flags = target_flags(db, target_id)
         slots = flags or [target]  # 可提交的 Flag：布置了靶点即各靶点各一枚，否则为靶机级 Flag
         # 静态 Flag 各队靶机相同：摘要命中即算，不区分取自哪支队伍
@@ -919,8 +973,8 @@ def submit_target_flag(target_id):
             for slot in slots:
                 if slot["flag_digest"]:
                     continue
-                derived = (env_flag_value(env["secret"], env["id"], slot["id"], kind="target") if flags
-                           else env_flag_value(env["secret"], env["id"], target_id))
+                derived = env_flag_value(env["secret"], env["id"], slot["id"],
+                                         kind="target" if flags else "flag", round_no=flag_round)
                 if flag_matches(derived, value):
                     # 命中本队环境的 Flag 不算攻击成功；命中他队环境即攻破该队靶机上的这个靶点
                     own_flag = env["team_id"] == team["id"]
@@ -931,8 +985,7 @@ def submit_target_flag(target_id):
         title = hit["title"] if matched and flags else ""
         victim_id = victim["team_id"] if victim else None
         victim_name = victim["team_name"] if victim else ""
-        # 同一支对手的同一靶点只计一次；静态 Flag 不区分对手，即每队每靶点一次
-        prior = matched and target_awarded(db, contest["id"], target_id, flag_id, team["id"], victim_id)
+        prior = matched and target_awarded(db, contest["id"], target_id, flag_id, team["id"], victim_id, flag_round)
         if prior:
             verdict, points = "already_solved", 0
         elif matched:
@@ -940,19 +993,19 @@ def submit_target_flag(target_id):
         else:
             verdict, points = "incorrect", 0
         db.execute(
-            """INSERT INTO flag_submissions (contest_id, puzzle_id, target_flag_id, team_id, victim_team_id, user_id,
+            """INSERT INTO flag_submissions (contest_id, puzzle_id, target_flag_id, team_id, victim_team_id, user_id, flag_round,
                                             verdict, points, submitted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (contest["id"], target_id, flag_id, team["id"], victim_id, g.user["id"], verdict, points, now),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (contest["id"], target_id, flag_id, team["id"], victim_id, g.user["id"], flag_round, verdict, points, now),
         )
         if verdict == "correct":
             reason = (f"攻破队伍「{victim_name}」" if victim else "攻破") + f"靶机「{target['title']}」"
             if flags:
                 reason += f"的靶点「{title}」"
             add_score(db, contest_id=contest["id"], team_id=team["id"], kind="attack", delta=points,
-                      round_no=max(1, contest_state(contest, now)["round"]), reason=reason, actor_id=g.user["id"], now=now)
+                      round_no=round_no, reason=reason, actor_id=g.user["id"], now=now)
     notice = {"puzzle_id": target_id, "verdict": verdict, "points": points, "own_flag": own_flag, "title": title,
-              "victim": victim_name, "victim_id": victim_id}
+              "victim": victim_name, "victim_id": victim_id, "flag_round": flag_round}
     session["flag_notice"] = notice
     return redirect(url_for("site.round_target", target_id=target_id), code=303)
 
@@ -962,18 +1015,16 @@ def submit_target_flag(target_id):
 def start_target_environment(target_id):
     db = get_db()
     with transaction(db, write=True):
-        contest, team, target, now = target_context(db, target_id)
+        contest, team, target, _ = target_context(db, target_id)
         if not target["env_image"]:
             abort(404)
-        ensured = ensure_environment_row(db, contest=contest, team=team, puzzle_id=target["id"], now=now)
-        if ensured is None:
-            return redirect(url_for("site.round_target", target_id=target_id), code=303)
-        env_id, secret, port = ensured
-    flag_env = target_flag_env(target["id"], [flag["id"] for flag in target_flags(db, target["id"])], secret, env_id)
-    return launch_environment(db, contest=contest, team=team, env_id=env_id, puzzle_id=target["id"],
-                              image=target["env_image"], container_port=target["env_container_port"],
-                              host_port=port, flag_env=flag_env, now=now,
-                              done_url=url_for("site.round_target", target_id=target_id))
+        db.execute(
+            """UPDATE breach_environments SET restart_requested = 1
+               WHERE contest_id = ? AND team_id = ? AND puzzle_id = ? AND status != 'starting'""",
+            (contest["id"], team["id"], target_id),
+        )
+    spawn_autostart(current_app, contest["id"])
+    return redirect(url_for("site.round_target", target_id=target_id), code=303)
 
 
 @site.post("/awdp/targets/<int:target_id>/env/stop")
@@ -989,7 +1040,8 @@ def stop_target_environment(target_id):
         if not env:
             abort(404)
         db.execute(
-            "UPDATE breach_environments SET status = 'stopped', stopped_at = ? WHERE id = ?", (now, env["id"]),
+            "UPDATE breach_environments SET status = 'stopped', stopped_at = ?, restart_requested = 0 WHERE id = ?",
+            (now, env["id"]),
         )
     try:
         stop_environment(contest["id"], team["id"], target["id"], container_id=env["container_id"])

@@ -3,6 +3,9 @@
 {% block content %}
   <div class="arena-back">{{ ui.link("返回赛题", url_for('site.awdp', view='tasks'), "link", "back") }}</div>
   {% call ui.heading(target.title, "AWDP 靶机 · " ~ target.category ~ " · " ~ target.difficulty ~ " · " ~ total_points ~ " 分") %}
+    {% if per_team and g.match.status == 'live' %}
+      <span class="arena-muted">第 {{ g.match.round }} 回合 · 剩余 <time class="arena-mono" data-clock-end="{{ g.match.round_end }}" data-server-now="{{ g.now }}">{{ countdown(g.match.round_end - g.now) }}</time></span>
+    {% endif %}
     {{ ui.pill(state[1], state[0]) }}
   {% endcall %}
   {% if target.env_image %}
@@ -11,12 +14,12 @@
       {% if not g.team %}
         <div class="arena-detail-copy"><p>各队伍的靶机由平台在开赛后统一开启；加入比赛队伍后此处显示本队靶机地址。</p></div>
       {% elif not environment or environment.status == 'stopped' %}
-        <div class="arena-detail-copy"><p>靶机由平台在开赛后为全部队伍统一开启并持续整个比赛周期；当前未运行时可点击重启，重启将分配全新端口，Flag 保持不变。</p></div>
+        <div class="arena-detail-copy"><p>当前靶机未运行。点击重启可分配新端口并启动本队靶机。</p></div>
         <form class="arena-actions" action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">
           {{ ui.csrf() }}<button class="arena-btn primary" type="submit">{{ ui.icon('plus') }}重启靶机</button>
         </form>
-      {% elif environment.status == 'starting' %}
-        <div class="arena-detail-copy"><p>靶机启动中，稍候自动刷新…</p></div>
+      {% elif refreshing or environment.status == 'starting' %}
+        <div class="arena-detail-copy"><p>{{ "正在准备本回合靶机和 Flag，页面将自动刷新。" if per_team else "靶机启动中，页面将自动刷新。" }}</p></div>
         <meta http-equiv="refresh" content="4">
       {% elif environment.status == 'error' %}
         <div class="arena-detail-copy"><div class="arena-feedback error" role="status">靶机启动失败：{{ environment.last_error or '未知错误' }}</div></div>
@@ -32,7 +35,8 @@
             {% endif %}
             <div><dt>状态</dt><dd>{{ ui.pill(env_statuses[environment.status], 'success') }}</dd></div>
           </dl>
-          <p>所有队伍的靶机由平台在开赛后统一开启，持续至比赛结束；本队 Flag 只对本队环境有效，重启靶机将分配全新端口，Flag 保持不变。</p>
+          {% if per_team %}<p>平台每回合沿用当前地址重建靶机并更新 Flag，容器内的临时改动随重建清空。同一回合手动重启会分配新端口并重新注入本回合 Flag。</p>
+          {% else %}<p>平台统一启动各队靶机。手动重启会分配新端口。</p>{% endif %}
         </div>
         <div class="arena-actions">
           <form action="{{ url_for('site.start_target_environment', target_id=target.id) }}" method="post">{{ ui.csrf() }}<button class="arena-btn" type="submit">重启靶机</button></form>
@@ -96,11 +100,11 @@
         {{ ui.csrf() }}<label class="arena-field">Flag<input class="arena-input arena-mono" name="flag" type="text" placeholder="flag{…}" maxlength="256" spellcheck="false" autocomplete="off" required></label>
         <div class="arena-actions"><button class="arena-btn primary" type="submit">提交 Flag</button></div>
         {% if flags and per_team %}
-        <small class="arena-muted">提交其他队伍靶机的正确 Flag 即可获得对应靶点积分。同一对手的同一靶点只计一次。</small>
+        <small class="arena-muted">提交本回合的正确 Flag 可获得对应靶点积分。同一对手的同一靶点每回合计分一次。</small>
         {% elif flags %}
         <small class="arena-muted">提交正确 Flag 即可获得对应靶点积分，每队每个靶点计分一次。</small>
         {% elif per_team %}
-        <small class="arena-muted">提交从<b>其他队伍</b>靶机中提取的 Flag 即可获得攻击积分；每攻破一支对手队伍的这台靶机计一次分，同一对手只计一次（本队靶机的 Flag 不计分）。</small>
+        <small class="arena-muted">提交其他队伍靶机的本回合 Flag 可获得攻击积分，每支对手队伍的靶机每回合计分一次。</small>
         {% else %}
         <small class="arena-muted">提交正确的 Flag 即可获得攻击积分；本队每台靶机只计一次。</small>
         {% endif %}

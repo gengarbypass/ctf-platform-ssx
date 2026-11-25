@@ -53,11 +53,11 @@ def start_environment(*, contest, team, image, container_port, host_port, flag_e
     flag_env 为注入容器的环境变量（按队派生的 Flag）；image 解题赛取赛题配置、
     综合渗透取比赛配置。
     """
-    client = docker_client()
     name = resource_name(contest["id"], team["id"], puzzle_id)
     network_name = resource_name(contest["id"], team["id"], puzzle_id, network=True)
-    stop_environment(contest["id"], team["id"], puzzle_id)
     try:
+        client = docker_client()
+        stop_environment(contest["id"], team["id"], puzzle_id)
         network = client.networks.create(network_name, driver="bridge", labels={"ctf.env": name})
         try:
             container = client.containers.run(

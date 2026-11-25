@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "target_flags", "flag_submissions",
     "contest_puzzles", "contest_teams", "breach_flags", "breach_submissions", "breach_environments",
@@ -235,6 +235,12 @@ def prepare_schema(connection):
                     connection.execute(
                         "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) "
                         "SELECT contest_id, id FROM teams WHERE contest_id IS NOT NULL")
+            if version:
+                for table in ("flag_submissions", "breach_environments"):
+                    add_column(connection, table, "flag_round INTEGER NOT NULL DEFAULT 0 CHECK (flag_round >= 0)")
+                add_column(connection, "breach_environments", "restart_requested INTEGER NOT NULL DEFAULT 0 CHECK (restart_requested IN (0, 1))")
+                connection.execute("DROP INDEX IF EXISTS one_target_flag_award")
+                connection.execute("DROP INDEX IF EXISTS one_target_machine_award")
             schema = tuple(schema_statements())
             if 1 <= version <= 12:
                 rebuild_tables(connection, schema)
@@ -242,6 +248,15 @@ def prepare_schema(connection):
                 for statement in schema:
                     connection.execute(statement)
             add_column(connection, "site_settings", "home_background_id INTEGER REFERENCES uploads(id)")
+            if version:
+                # 已计分的动态 Flag 归入原提交回合，避免升级后在同回合再次计分。
+                connection.execute(
+                    """UPDATE flag_submissions AS f
+                       SET flag_round = 1 + (f.submitted_at - c.start_at) / c.round_seconds
+                       FROM contests c
+                       WHERE f.contest_id = c.id AND c.mode = 'round' AND f.victim_team_id IS NOT NULL
+                         AND f.flag_round = 0 AND f.submitted_at >= c.start_at AND f.submitted_at < c.end_at"""
+                )
             # rename/drop 可能遗留悬挂外键：如实修复
             for table in dangling_junctions(connection):
                 recreate_junction(connection, table, schema)

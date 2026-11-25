@@ -137,12 +137,14 @@ def flag_matches(expected, value):
     return hmac.compare_digest(expected.encode("utf-8"), value.encode("utf-8"))
 
 
-def env_flag_value(secret, env_id, flag_id, *, kind="flag"):
-    """由环境密钥派生某靶点对某队伍的动态 Flag；secret 不变则值稳定，供重启后保持。
+def env_flag_value(secret, env_id, flag_id, *, kind="flag", round_no=0):
+    """由环境密钥派生动态 Flag，AWDP 还使用回合编号。
 
     kind 区分派生用途：AWDP 靶机的靶点用 "target"，避免靶点 ID 与靶机 ID 相同时与靶机级 Flag 派生出同一个值。
     """
-    digest = hmac.new(secret.encode("utf-8"), f"env:{env_id}:{kind}:{flag_id}".encode("utf-8"), "sha256").hexdigest()[:16]
+    scope = f":round:{round_no}" if round_no else ""
+    message = f"env:{env_id}:{kind}:{flag_id}{scope}".encode("utf-8")
+    digest = hmac.new(secret.encode("utf-8"), message, "sha256").hexdigest()[:16]
     return f"flag{{e{env_id}-{digest}}}"
 
 

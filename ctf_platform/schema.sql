@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS flag_submissions (
     -- AWDP 动态靶机：这枚 Flag 取自哪支队伍的靶机（各队实例的 Flag 互不相同，据此按被攻破的队伍计次）；
     -- 该队伍被删除时连同这些攻击记录一起删除（攻击方已获积分保留在计分流水）
     victim_team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE,
+    flag_round INTEGER NOT NULL DEFAULT 0 CHECK (flag_round >= 0),
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     verdict TEXT NOT NULL CHECK (verdict IN ('correct', 'incorrect', 'already_solved')),
     points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
@@ -140,14 +141,13 @@ CREATE TABLE IF NOT EXISTS flag_submissions (
 CREATE INDEX IF NOT EXISTS flags_team ON flag_submissions(contest_id, team_id, id DESC);
 CREATE INDEX IF NOT EXISTS flags_team_recent ON flag_submissions(contest_id, team_id, submitted_at);
 CREATE INDEX IF NOT EXISTS flags_contest ON flag_submissions(contest_id, id DESC);
--- 每队每靶点的攻击分只计一次（数据库层兜底）；动态靶机按被攻破的队伍各计一次，victim_team_id 为空即静态 Flag 或升级前的记录。
--- 未布置靶点的靶机该列为空，不受此索引约束（靶点被删除后旧记录的该列同样置空，得以保留）
+-- 动态 AWDP 的每个对手靶点每回合计分一次，静态 Flag 的 flag_round 为 0。
 CREATE UNIQUE INDEX IF NOT EXISTS one_target_flag_award
-    ON flag_submissions(contest_id, target_flag_id, team_id, COALESCE(victim_team_id, 0))
+    ON flag_submissions(contest_id, flag_round, target_flag_id, team_id, COALESCE(victim_team_id, 0))
     WHERE verdict = 'correct' AND target_flag_id IS NOT NULL;
--- 未布置靶点的靶机：靶机级 Flag 没有靶点可依，按靶机计次——同一队攻破同一支对手队伍的这台靶机只计一次
+-- 未布置靶点的动态 AWDP 靶机按对手实例和回合计分。
 CREATE UNIQUE INDEX IF NOT EXISTS one_target_machine_award
-    ON flag_submissions(contest_id, puzzle_id, team_id, victim_team_id)
+    ON flag_submissions(contest_id, flag_round, puzzle_id, team_id, victim_team_id)
     WHERE verdict = 'correct' AND target_flag_id IS NULL AND victim_team_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS breach_flags (
@@ -190,6 +190,8 @@ CREATE TABLE IF NOT EXISTS breach_environments (
     network_id TEXT NOT NULL DEFAULT '',
     host_port INTEGER,
     secret TEXT NOT NULL,
+    flag_round INTEGER NOT NULL DEFAULT 0 CHECK (flag_round >= 0),
+    restart_requested INTEGER NOT NULL DEFAULT 0 CHECK (restart_requested IN (0, 1)),
     status TEXT NOT NULL DEFAULT 'starting' CHECK (status IN ('starting', 'running', 'stopped', 'error')),
     last_error TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
