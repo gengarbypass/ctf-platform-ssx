@@ -47,6 +47,7 @@ def create_app(overrides=None):
         BOARD_POLL_SECONDS=_setting_int("CTF_BOARD_POLL_SECONDS", 4, 2, 60),
         ENV_HOST=os.environ.get("CTF_ENV_HOST", ""),
         ENV_PORT_START=_setting_int("CTF_ENV_PORT_START", 8400, 1024, 65000),
+        ENV_NETWORK_POOL=os.environ.get("CTF_ENV_NETWORK_POOL") or "10.240.0.0/16",
         ENV_MEM_LIMIT=os.environ.get("CTF_ENV_MEM_LIMIT", "768m"),
         ENV_CPU_QUOTA=_setting_int("CTF_ENV_CPU_QUOTA", 150000, 10000, 1000000),
         ENV_PIDS_LIMIT=_setting_int("CTF_ENV_PIDS_LIMIT", 320, 32, 8192),

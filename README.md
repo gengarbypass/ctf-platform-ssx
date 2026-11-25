@@ -76,6 +76,7 @@ sudo bash deploy.sh
 | `CTF_WEB_THREADS` | `4` | 每个 Gunicorn 进程的线程数 |
 | `CTF_ENV_HOST` | 空 | 动态环境对选手展示的地址主机名；留空时按访问请求的主机推导 |
 | `CTF_ENV_PORT_START` | `8400` | 动态环境端口池起点，安全组需放行后续范围 |
+| `CTF_ENV_NETWORK_POOL` | `10.240.0.0/16` | 动态靶机的 IPv4 地址池，每台分配独立的 `/28`。应避开宿主机、VPC 和其他网络使用的网段 |
 | `CTF_ENV_MEM_LIMIT` | `768m` | 每个动态环境容器的内存上限 |
 | `CTF_ENV_CPU_QUOTA` | `150000` | 每个动态环境容器的 CPU 配额（100000 为 1 核） |
 | `CTF_ENV_PIDS_LIMIT` | `320` | 每个动态环境容器的进程数上限 |

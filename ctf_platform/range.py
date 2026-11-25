@@ -5,6 +5,7 @@ CTF_ENV_DOCKER_URL 覆盖（如 Windows Docker Desktop 的 npipe 地址）。
 测试通过 app.config["RANGE_DOCKER_FACTORY"] 注入假客户端，避免真实 Docker 依赖。
 """
 import os
+from ipaddress import IPv4Network
 
 from flask import current_app
 
@@ -47,6 +48,43 @@ def stop_environment(contest_id, team_id, puzzle_id=0, *, container_id=""):
         pass
 
 
+def create_environment_network(client, name, network_name, host_port):
+    """从靶机地址池分配一个独立的 /28 子网。"""
+    from docker.errors import APIError
+    from docker.types import IPAMConfig, IPAMPool
+
+    try:
+        pool = IPv4Network(current_app.config["ENV_NETWORK_POOL"])
+    except ValueError as error:
+        raise RangeError("CTF_ENV_NETWORK_POOL 须为有效的 IPv4 CIDR。") from error
+    if pool.prefixlen > 28:
+        raise RangeError("CTF_ENV_NETWORK_POOL 至少应包含一个 /28 子网。")
+
+    occupied = []
+    for network in client.networks.list():
+        for config in (network.attrs.get("IPAM") or {}).get("Config") or []:
+            subnet = config.get("Subnet")
+            if subnet and ":" not in subnet:
+                occupied.append(IPv4Network(subnet, strict=False))
+
+    subnet_size = 16
+    subnet_count = pool.num_addresses // subnet_size
+    first_address = int(pool.network_address)
+    for offset in range(subnet_count):
+        index = (host_port + offset) % subnet_count
+        subnet = IPv4Network((first_address + index * subnet_size, 28))
+        if any(subnet.overlaps(existing) for existing in occupied):
+            continue
+        ipam = IPAMConfig(pool_configs=[IPAMPool(subnet=str(subnet))])
+        try:
+            return client.networks.create(network_name, driver="bridge", labels={"ctf.env": name}, ipam=ipam)
+        except APIError as error:
+            # 其他启动任务可能在读取网络列表之后占用了该子网。
+            if "overlap" not in str(error.explanation).lower():
+                raise
+    raise RangeError(f"靶机地址池 {pool} 没有可用的 /28 子网，请配置空闲的 CTF_ENV_NETWORK_POOL。")
+
+
 def start_environment(*, contest, team, image, container_port, host_port, flag_env, puzzle_id=0):
     """为队伍创建专属网络与容器并启动，返回 (container_id, network_id)。
 
@@ -58,7 +96,7 @@ def start_environment(*, contest, team, image, container_port, host_port, flag_e
     try:
         client = docker_client()
         stop_environment(contest["id"], team["id"], puzzle_id)
-        network = client.networks.create(network_name, driver="bridge", labels={"ctf.env": name})
+        network = create_environment_network(client, name, network_name, host_port)
         try:
             container = client.containers.run(
                 image,

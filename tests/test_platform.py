@@ -12,11 +12,13 @@ from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from docker.errors import APIError
 from PIL import Image
 
 from ctf_platform import create_app
 from ctf_platform.db import SCHEMA_VERSION, connect
 from ctf_platform.domain import env_flag_value
+from ctf_platform.range import start_environment
 from ctf_platform.views import sync_active_awdp
 
 
@@ -44,7 +46,7 @@ class FakeDocker:
     """记录容器/网络操作的最小 Docker 客户端替身。"""
 
     def __init__(self):
-        self.state = {"runs": [], "networks": []}
+        self.state = {"runs": [], "networks": [], "network_options": {}}
         self.containers = self.Containers(self.state)
         self.networks = self.Networks(self.state)
 
@@ -69,12 +71,21 @@ class FakeDocker:
 
         def create(self, name, **kwargs):
             self.state["networks"].append(name)
+            self.state["network_options"][name] = kwargs
             return SimpleNamespace(id=f"nid-{len(self.state['networks'])}",
-                                   remove=lambda: self.state["networks"].remove(name))
+                                   remove=lambda: self.remove(name))
+
+        def remove(self, name):
+            self.state["networks"].remove(name)
+            del self.state["network_options"][name]
+
+        def list(self):
+            return [SimpleNamespace(attrs={"IPAM": options.get("ipam")})
+                    for options in list(self.state["network_options"].values())]
 
         def get(self, name):
             if name in self.state["networks"]:
-                return SimpleNamespace(id=name, remove=lambda: self.state["networks"].remove(name))
+                return SimpleNamespace(id=name, remove=lambda: self.remove(name))
             raise LookupError(name)
 
 
@@ -395,6 +406,29 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, "/manage/challenges/breach/new", contest_id=contest_id,
                   layer=["", ""], title=["", ""], points=["100", "100"], flag=["", ""], code=400)
         self.assertEqual(len(self.lookup("SELECT id FROM breach_flags WHERE contest_id = ?", (contest_id,))), 3)
+
+    def test_environment_network_pool_allocates_independent_subnets(self):
+        fake = FakeDocker()
+        self.app.config.update(RANGE_DOCKER_FACTORY=lambda: fake, ENV_NETWORK_POOL="10.240.0.0/16")
+        fake.networks.create("occupied", ipam={"Config": [{"Subnet": "10.240.13.0/28"}]})
+        create = fake.networks.create
+
+        def create_with_collision(name, **options):
+            subnet = options["ipam"]["Config"][0]["Subnet"]
+            if subnet == "10.240.13.16/28":
+                create("concurrent", ipam={"Config": [{"Subnet": subnet}]})
+                raise APIError("network creation rejected", explanation="Pool overlaps with other one on this address space")
+            return create(name, **options)
+
+        with self.app.app_context(), patch.object(fake.networks, "create", side_effect=create_with_collision):
+            for slot in range(52):
+                start_environment(contest={"id": 1}, team={"id": slot + 1}, puzzle_id=1, image="nginx:alpine",
+                                  container_port=80, host_port=8400 + slot, flag_env={})
+        subnets = [options["ipam"]["Config"][0]["Subnet"] for options in fake.state["network_options"].values()]
+        self.assertEqual(len(subnets), 54)
+        self.assertEqual(len(set(subnets)), 54)
+        self.assertTrue(all(subnet.endswith("/28") for subnet in subnets))
+        self.assertEqual(len(fake.state["runs"]), 52)
 
     def test_breach_dynamic_environments(self):
         fake = FakeDocker()
