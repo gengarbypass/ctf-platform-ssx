@@ -71,7 +71,7 @@
           {% if not target_flags %}{{ target_flag_row(1) }}{% endif %}
         </div>
         <div class="arena-actions"><button class="arena-btn" type="button" data-breach-add>{{ ui.icon('plus') }}添加靶点</button></div>
-        <small class="arena-muted">靶点选填（镜像里有几个 Flag 就填写几行）：每个靶点各有一枚独立 Flag 与独立分值，按靶点顺序注入容器（FLAG_1、FLAG_2…），选手提交时由平台自动匹配靶点；全部留空即只有靶机级的一枚 Flag（镜像里只读 `FLAG` 时适用）。{% if task and task.env_image %}当前靶机已填写环境镜像，靶点 Flag 须留空，由平台按队伍动态生成。{% endif %}开赛后请勿增删靶点：已在运行的靶机需重启才会按新靶点注入。</small>
+        <small class="arena-muted">靶点选填（镜像里有几个 Flag 就填写几行）：每个靶点各有一枚独立 Flag 与独立分值，按靶点顺序注入容器（FLAG_1、FLAG_2…），选手提交时由平台自动识别取自哪支队伍、对应哪个靶点并计分。{% if task and task.env_image %}当前靶机已填写环境镜像，靶点 Flag 须留空，由平台按队伍动态生成。{% endif %}开赛后增删靶点或更换镜像、容器端口时，平台会自动为全部队伍重启该靶机并重新注入 Flag（各队靶机地址会变）；只改靶点的名称、分值、提示不会重启。删除靶点会同时删除它的攻击记录，已获积分保留。</small>
         {% endif %}
       {% elif kind == 'breach' and task %}
         {{ ui.field("所属层级","layer",task.layer,max=40,placeholder="如 边界突破 / 内网横向 / 设备接管") }}

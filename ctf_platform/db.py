@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "target_flags", "flag_submissions",
     "contest_puzzles", "contest_teams", "breach_flags", "breach_submissions", "breach_environments",

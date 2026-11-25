@@ -14,7 +14,7 @@ from .domain import (
 from .queries import add_score, breach_records, flag_records, patch_records, score_records, service_matrix, target_flags
 from .range import RangeError, probe_image, stop_environment
 from .storage import crop_cover, read_upload, save_upload
-from .views import PAGE_SIZE, page_number, records_kind, spawn_autostart
+from .views import PAGE_SIZE, page_number, records_kind, restart_target_environments, spawn_autostart
 
 
 def purge_environments(env_rows):
@@ -827,6 +827,7 @@ def bank_edit(task_id):
     salt_and_digest = new_flag(flag) if flag else (("", "") if flag_rows or (env_image and not task) else None)
     uploads = [read_upload(file, "attachment", required=True) for file in request.files.getlist("attachments") if file.filename]
     remove_ids = [int(item) for item in request.form.getlist("remove_file") if item.isdecimal() and len(item) <= 18]
+    previous_layout = target_layout(db, task_id) if task and kind == "round" else None
     with transaction(db, write=True):
         if join_contest:
             contest_row = db.execute("SELECT mode FROM contests WHERE id = ?", (join_contest,)).fetchone()
@@ -864,9 +865,13 @@ def bank_edit(task_id):
     if join_contest and kind == "round" and env_image:
         # 比赛中新建靶机：随即为全场队伍补启该靶机环境
         spawn_autostart(current_app, join_contest)
+    message = f"{unit}已保存"
+    if previous_layout is not None and target_layout(db, task_id) != previous_layout and restart_target_environments(db, task_id):
+        # 镜像、容器端口或靶点有变动：运行中的容器不会重新注入 Flag，为全部队伍重启该靶机
+        message += "；镜像或靶点有变动，正在为全部队伍重启该靶机以注入新的 Flag"
     if join_contest:
-        return saved(f"{unit}已保存并加入比赛。", "manage.contest_puzzles", contest_id=join_contest)
-    return saved(f"{unit}已保存。", "manage.bank")
+        return saved(message + "并加入比赛。", "manage.contest_puzzles", contest_id=join_contest)
+    return saved(message + "。", "manage.bank")
 
 
 @manage.route("/bank/<int:task_id>/delete", methods=["GET", "POST"])
@@ -948,8 +953,21 @@ def target_flag_rows(*, puzzle_id, dynamic):
     return rows
 
 
+def target_layout(db, puzzle_id):
+    """靶机的 Flag 布局：环境镜像、容器端口与靶点 ID 顺序。
+
+    运行中的容器只认启动时注入的 Flag，布局任一项变动后都要重启各队环境才生效。
+    """
+    row = db.execute("SELECT env_image, env_container_port FROM puzzles WHERE id = ?", (puzzle_id,)).fetchone()
+    return (row["env_image"], row["env_container_port"],
+            tuple(item[0] for item in db.execute("SELECT id FROM target_flags WHERE puzzle_id = ? ORDER BY id", (puzzle_id,))))
+
+
 def save_target_flags(db, puzzle_id, rows):
-    """按表单行同步靶机的靶点：已有的就地更新，新的插入，未出现在表单里的删除。"""
+    """按表单行同步靶机的靶点：已有的就地更新，新的插入，未出现在表单里的删除。
+
+    被删靶点的攻击记录一并删除（已获积分保留在计分流水）：靶点已不存在，记录留着会被当成靶机级 Flag 的记录。
+    """
     keep = []
     for row in rows:
         values = (row["title"], row["description"], row["points"], row["flag_salt"], row["flag_digest"])
@@ -963,11 +981,9 @@ def save_target_flags(db, puzzle_id, rows):
                 """INSERT INTO target_flags (puzzle_id, title, description, points, flag_salt, flag_digest)
                    VALUES (?, ?, ?, ?, ?, ?)""", (puzzle_id, *values),
             ).lastrowid)
-    if keep:
-        db.execute(f"DELETE FROM target_flags WHERE puzzle_id = ? AND id NOT IN ({','.join('?' * len(keep))})",
-                   (puzzle_id, *keep))
-    else:
-        db.execute("DELETE FROM target_flags WHERE puzzle_id = ?", (puzzle_id,))
+    stale = " FROM target_flags WHERE puzzle_id = ?" + (" AND id NOT IN (" + ",".join("?" * len(keep)) + ")" if keep else "")
+    db.execute("DELETE FROM flag_submissions WHERE target_flag_id IN (SELECT id" + stale + ")", (puzzle_id, *keep))
+    db.execute("DELETE" + stale, (puzzle_id, *keep))
 
 
 def breach_flag_rows(*, allow_empty_flags):

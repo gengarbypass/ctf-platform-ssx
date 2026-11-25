@@ -144,6 +144,10 @@ CREATE INDEX IF NOT EXISTS flags_contest ON flag_submissions(contest_id, id DESC
 CREATE UNIQUE INDEX IF NOT EXISTS one_target_flag_award
     ON flag_submissions(contest_id, target_flag_id, team_id, COALESCE(victim_team_id, 0))
     WHERE verdict = 'correct' AND target_flag_id IS NOT NULL;
+-- 未布置靶点的靶机：靶机级 Flag 没有靶点可依，按靶机计次——同一队攻破同一支对手队伍的这台靶机只计一次
+CREATE UNIQUE INDEX IF NOT EXISTS one_target_machine_award
+    ON flag_submissions(contest_id, puzzle_id, team_id, victim_team_id)
+    WHERE verdict = 'correct' AND target_flag_id IS NULL AND victim_team_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS breach_flags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

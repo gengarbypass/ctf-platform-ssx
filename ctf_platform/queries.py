@@ -160,19 +160,34 @@ def target_awards(db, contest_id, puzzle_ids):
     """AWDP 靶机的攻击命中明细：{靶机ID: {队伍ID: {(靶点ID 或 None, 被攻破队伍ID 或 None)}}}。
 
     动态靶机各队实例的 Flag 互不相同，同一队攻破几支队伍的靶机，同一靶点就出现几次；
-    静态 Flag 各队靶机相同、无从区分来源，被攻破队伍记为 None。未布置靶点的靶机没有靶点，靶点记为 None。
+    静态 Flag 各队靶机相同、无从区分来源，被攻破队伍记为 None。未布置靶点的靶机没有靶点，靶点记为 None；
+    靶机后来登记了靶点时，登记前留下的靶机级记录不再计入进度（积分保留在计分流水）。
     """
     awards = {puzzle_id: {} for puzzle_id in puzzle_ids}
     if not puzzle_ids:
         return awards
     placeholders = ",".join("?" * len(puzzle_ids))
     for row in db.execute(
-        f"""SELECT puzzle_id, team_id, target_flag_id, victim_team_id FROM flag_submissions
-            WHERE contest_id = ? AND verdict = 'correct' AND puzzle_id IN ({placeholders})""",
+        f"""SELECT f.puzzle_id, f.team_id, f.target_flag_id, f.victim_team_id FROM flag_submissions f
+            WHERE f.contest_id = ? AND f.verdict = 'correct' AND f.puzzle_id IN ({placeholders})
+              AND (f.target_flag_id IS NOT NULL
+                   OR NOT EXISTS (SELECT 1 FROM target_flags tf WHERE tf.puzzle_id = f.puzzle_id))""",
         (contest_id, *puzzle_ids),
     ):
         awards[row["puzzle_id"]].setdefault(row["team_id"], set()).add((row["target_flag_id"], row["victim_team_id"]))
     return awards
+
+
+def target_awarded(db, contest_id, puzzle_id, flag_id, team_id, victim_id):
+    """该队是否已因攻破某支队伍靶机上的某个靶点获得过攻击分（同一比赛、同一台靶机内判断）。
+
+    flag_id 为空表示未布置靶点的靶机级 Flag；victim_id 为空表示静态 Flag（各队靶机相同，不区分对手）。
+    """
+    return db.execute(
+        """SELECT 1 FROM flag_submissions WHERE contest_id = ? AND puzzle_id = ? AND team_id = ? AND verdict = 'correct'
+           AND target_flag_id IS ? AND victim_team_id IS ? LIMIT 1""",
+        (contest_id, puzzle_id, team_id, flag_id, victim_id),
+    ).fetchone() is not None
 
 
 def target_breaches(awards, flag_total):

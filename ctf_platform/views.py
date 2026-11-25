@@ -18,7 +18,7 @@ from .range import RangeError, start_environment, stop_environment
 from .queries import (
     add_score, breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
     patch_records, puzzle_player_rankings, puzzle_rankings, rival_count, round_rankings, round_targets, round_trend,
-    score_records, service_matrix, target_awards, target_breaches, target_flags, team_list,
+    score_records, service_matrix, target_awarded, target_awards, target_breaches, target_flags, team_list,
 )
 from .storage import read_upload, save_upload, serve_upload
 
@@ -279,7 +279,8 @@ def environment_host():
 
 
 _autostart_guard = threading.Lock()
-_autostart_running = set()
+# 比赛 ID -> {"running": 是否有一轮在执行, "again": 本轮结束后是否还需再跑一轮, "restart": 待重启的靶机 ID}
+_autostart_state = {}
 
 
 def round_env_targets(db, contest_id):
@@ -303,8 +304,11 @@ def missing_round_environments(db, contest_id, targets):
     return teams * len(targets) - covered
 
 
-def autostart_round_targets(app, contest_id):
-    """为全部队伍启动所有已发布靶机容器：整场运行（到期=比赛结束）、幂等可重入、失败按环境行记录。"""
+def autostart_round_targets(app, contest_id, restart=frozenset()):
+    """为全部队伍启动所有已发布靶机容器：整场运行（到期=比赛结束）、幂等可重入、失败按环境行记录。
+
+    restart 中的靶机连同已在运行的环境一并重启（换新端口、重建容器），用于 Flag 布局变动后重新注入。
+    """
     with app.app_context():
         db = connect(app.config["DATABASE"])
         try:
@@ -325,7 +329,7 @@ def autostart_round_targets(app, contest_id):
                     ).fetchone()
                     try:
                         with transaction(db, write=True):
-                            if env and env["status"] in ("starting", "running"):
+                            if env and env["status"] in ("starting", "running") and target["id"] not in restart:
                                 # 已在运行：把到期时间统一续到比赛结束
                                 if env["expires_at"] != contest["end_at"]:
                                     db.execute("UPDATE breach_environments SET expires_at = ? WHERE id = ?",
@@ -388,26 +392,56 @@ def autostart_round_targets(app, contest_id):
             db.close()
 
 
-def spawn_autostart(app, contest_id):
-    """后台补齐全场靶机；TESTING 下同步执行以保证测试确定性，运行中防重入。"""
+def spawn_autostart(app, contest_id, restart=()):
+    """后台补齐全场靶机，restart 中的靶机连同已在运行的一并重启；TESTING 下同步执行以保证测试确定性，运行中防重入。"""
     # current_app 是线程绑定的代理，跨线程前解出真实应用对象
     app = app._get_current_object() if hasattr(app, "_get_current_object") else app
     with _autostart_guard:
-        if contest_id in _autostart_running:
+        state = _autostart_state.setdefault(contest_id, {"running": False, "again": False, "restart": set()})
+        state["restart"].update(restart)
+        if state["running"]:
+            state["again"] = True  # 已有一轮在执行：结束后带着这次的重启请求再跑一轮
             return
-        _autostart_running.add(contest_id)
+        state["running"] = True
 
     def run():
         try:
-            autostart_round_targets(app, contest_id)
-        finally:
+            while True:
+                with _autostart_guard:
+                    pending, state["restart"], state["again"] = frozenset(state["restart"]), set(), False
+                autostart_round_targets(app, contest_id, pending)
+                with _autostart_guard:
+                    if not (state["again"] or state["restart"]):
+                        state["running"] = False
+                        return
+        except BaseException:
             with _autostart_guard:
-                _autostart_running.discard(contest_id)
+                state.update(running=False, again=False, restart=set())
+            raise
 
     if app.config.get("TESTING"):
         run()
     else:
         threading.Thread(target=run, daemon=True, name=f"awdp-autostart-{contest_id}").start()
+
+
+def restart_target_environments(db, puzzle_id):
+    """靶机的 Flag 布局（镜像、容器端口、靶点）变动后重启该靶机：运行中的容器不会自动重新注入 Flag。
+
+    为每场进行中的比赛里该靶机已有的环境换新端口、重建容器，交给后台补齐任务执行；返回涉及的比赛 ID。
+    """
+    now = int(time.time())
+    contest_ids = []
+    for row in db.execute(
+        """SELECT DISTINCT contest_id FROM breach_environments
+           WHERE puzzle_id = ? AND status IN ('starting', 'running') ORDER BY contest_id""", (puzzle_id,),
+    ).fetchall():
+        contest = db.execute("SELECT * FROM contests WHERE id = ?", (row["contest_id"],)).fetchone()
+        if contest and contest_state(contest, now)["status"] == "live":
+            contest_ids.append(contest["id"])
+    for contest_id in contest_ids:
+        spawn_autostart(current_app, contest_id, restart={puzzle_id})
+    return contest_ids
 
 
 def allocate_environment_port(db):
@@ -892,11 +926,7 @@ def submit_target_flag(target_id):
         victim_id = victim["team_id"] if victim else None
         victim_name = victim["team_name"] if victim else ""
         # 同一支对手的同一靶点只计一次；静态 Flag 不区分对手，即每队每靶点一次
-        prior = matched and db.execute(
-            """SELECT 1 FROM flag_submissions WHERE contest_id = ? AND team_id = ? AND verdict = 'correct'
-               AND target_flag_id IS ? AND victim_team_id IS ? LIMIT 1""",
-            (contest["id"], team["id"], flag_id, victim_id),
-        ).fetchone() is not None
+        prior = matched and target_awarded(db, contest["id"], target_id, flag_id, team["id"], victim_id)
         if prior:
             verdict, points = "already_solved", 0
         elif matched:
