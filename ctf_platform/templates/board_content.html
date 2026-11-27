@@ -3,9 +3,6 @@
 {%- endmacro -%}
 {%- macro score(value) -%}<b data-sb-value="{{ value }}">{{ '{:,}'.format(value) }}</b>{%- endmacro -%}
 {%- macro shift() -%}<span class="sb-shift" data-sb-shift aria-label="名次无变化">—</span>{%- endmacro -%}
-{%- macro health(value, label=true) -%}
-  <span class="sb-health-chip {{ {'healthy':'','unhealthy':'bad','maintenance':'maintenance','unknown':'unknown'}[value] }}"{% if label %} role="img" aria-label="{{ service_states[value] }}"{% else %} aria-hidden="true"{% endif %}>{{ {'healthy':'✓','unhealthy':'×','maintenance':'–','unknown':'?'}[value] }}</span>
-{%- endmacro -%}
 {%- macro scores(rows, kind) -%}
   <div class="sb-table-frame"><table class="sb-table {{ 'sb-table-round' if kind == 'round' }}" aria-label="队伍排名">
     <thead><tr><th scope="col">名次</th><th scope="col">队伍</th>
@@ -69,19 +66,4 @@
       {{ feed(board.events, kind) }}
     </div>
   </div>
-  {% if kind == 'round' %}
-  <section class="sb-panel sb-matrix-panel">
-    <header class="sb-panel-header"><h2>服务状态</h2>{% if board.matrix.total %}<small><b class="sb-health-total">{{ board.matrix.healthy }} / {{ board.matrix.total }}</b> 正常</small>{% endif %}</header>
-    {% if board.matrix.total %}
-      <div class="sb-table-frame"><table class="sb-table sb-health-table" aria-label="队伍服务状态">
-        <thead><tr><th scope="col">队伍</th>{% for task in board.matrix.tasks %}<th scope="col">{{ task.title }}</th>{% endfor %}</tr></thead>
-        <tbody>{% for team in board.matrix.teams %}<tr><td><strong class="sb-health-name">{{ team.name }}</strong></td>
-          {% for task in board.matrix.tasks %}{% set status = board.matrix.states.get((team.id,task.id),'unknown') %}
-          <td data-sb-service="{{ team.id }}-{{ task.id }}" data-sb-health="{{ status }}">{{ health(status) }}</td>{% endfor %}
-        </tr>{% endfor %}</tbody>
-      </table></div>
-      <div class="sb-health-legend">{% for key,label in service_states.items() %}<span>{{ health(key,false) }}{{ label }}</span>{% endfor %}</div>
-    {% else %}<p class="sb-empty">暂无服务状态。</p>{% endif %}
-  </section>
-  {% endif %}
 {% endif %}

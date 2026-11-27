@@ -1204,7 +1204,7 @@ def board_snapshot(kind):
     with transaction(get_db()) as db:
         contest = db.execute("SELECT * FROM contests WHERE active = 1 AND mode = ?", (kind,)).fetchone()
         state = contest_state(contest, now)
-        data = {"teams": [], "events": [], "players": [], "matrix": None}
+        data = {"teams": [], "events": [], "players": []}
         if contest:
             contest_id = contest["id"]
             if kind == "puzzle":
@@ -1214,8 +1214,7 @@ def board_snapshot(kind):
                 data.update(teams=breach_rankings(db, contest_id), events=breach_records(db, contest_id, accepted=True, limit=5),
                             players=breach_player_rankings(db, contest_id))
             else:
-                matrix = service_matrix(db, contest_id) if state["status"] != "upcoming" else None
-                data.update(teams=round_rankings(db, contest_id), matrix=matrix,
+                data.update(teams=round_rankings(db, contest_id),
                             events=score_records(db, contest_id, round_no=state["round"], limit=5),
                             players=round_player_rankings(db, contest_id))
     clock_label, clock_end = "赛事未开启", now

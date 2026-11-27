@@ -375,7 +375,10 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual([row["delta"] for row in self.lookup("SELECT delta FROM score_events ORDER BY id")], [120, -120, 35])
         board = player.get("/api/scoreboard/round").json["content"]
         self.assertIn('data-sb-value="35"', board)
-        self.assertIn('data-sb-health="healthy"', board)
+        self.assertNotIn("服务状态", board)
+        team_status = player.get("/awdp?view=teams").get_data(as_text=True)
+        self.assertIn("队伍与服务状态", team_status)
+        self.assertIn(">正常</span>", team_status)
         self.assertIn("选手攻击/加固得分", board)
         self.assertIn("复核退回", player.get("/submissions?kind=patch").get_data(as_text=True))
         for page in ("/awdp", "/awdp?view=teams", "/awdp?view=patches", "/awdp?view=tasks", f"/awdp/challenges/{task_id}"):
@@ -1952,7 +1955,7 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("选手攻击/加固得分", rounds)
         self.assertRegex(rounds, r'<tr data-sb-team="\d+" data-sb-rank="4">')
         self.assertIn("本回合剩余", rounds)
-        self.assertIn("服务状态", rounds)
+        self.assertNotIn("服务状态", rounds)
 
     def test_manage_unopened_contests_and_switch_entries(self):
         puzzle_contest = self.contest(active=False)
