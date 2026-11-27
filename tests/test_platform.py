@@ -16,7 +16,7 @@ from docker.errors import APIError
 from PIL import Image
 
 from ctf_platform import create_app
-from ctf_platform.db import SCHEMA_VERSION, connect
+from ctf_platform.db import SCHEMA_VERSION, connect, transaction
 from ctf_platform.domain import env_flag_value
 from ctf_platform.range import start_environment
 from ctf_platform.views import sync_active_awdp
@@ -469,17 +469,20 @@ class PlatformTest(unittest.TestCase):
             "SELECT verdict, points FROM breach_submissions WHERE team_id = ? ORDER BY id", (team_id,))],
             [("correct", 100), ("incorrect", 0)])
 
-        # 并发上限：第三队被拒
+        # 并发已满时，新启动和重开已停止的环境都需要等待空位
         self.post(third, "/breach/env/start", code=400)
-        # 停止后重启：secret（Flag）不变，端口更换且台账保证永不复用历史端口
         self.post(player, "/breach/env/stop")
+        self.post(third, "/breach/env/start")
+        self.post(player, "/breach/env/start", code=400)
+        self.post(third, "/breach/env/stop")
+        # 重启继续使用原 secret，但分配新的端口
         self.post(player, "/breach/env/start")
         restarted = self.lookup("SELECT * FROM breach_environments WHERE team_id = ?", (team_id,))[0]
         self.assertEqual(restarted["secret"], env["secret"])
-        self.assertEqual(restarted["host_port"], 8402)
+        self.assertEqual(restarted["host_port"], 8403)
         self.assertEqual([row[0] for row in self.lookup("SELECT port FROM env_ports ORDER BY port")],
-                         [8400, 8401, 8402])
-        self.assertIn(":8402</a>", player.get("/breach").get_data(as_text=True))
+                         [8400, 8401, 8402, 8403])
+        self.assertIn(":8403</a>", player.get("/breach").get_data(as_text=True))
         result = self.post(player, "/breach/flag", flag=env_flag_value(env["secret"], env["id"], 2), follow=True, code=200)
         self.assertIn("本队获得 150 分", result.get_data(as_text=True))
         self.assertIn("<strong>250</strong>", player.get("/breach").get_data(as_text=True))
@@ -1574,6 +1577,58 @@ class PlatformTest(unittest.TestCase):
             """SELECT m.user_id FROM memberships m JOIN users u ON u.id = m.user_id
                WHERE m.contest_id = ? AND u.username = 'fox01'""", (carried_id,))
         self.assertEqual(len(carried), 1)
+
+    def test_upgrade_puzzle_environment_limit_and_preserve_it_on_edit(self):
+        contest_id = self.contest(cover=True, env_max=500, env_ttl_minutes=180)
+        _, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        puzzle_id = self.puzzle(contest_id)
+        original = self.lookup("SELECT * FROM contests WHERE id = ?", (contest_id,))[0]
+        with closing(connect(self.app.config["DATABASE"])) as db:
+            db.execute("PRAGMA foreign_keys = OFF")
+            with transaction(db, write=True):
+                definition = db.execute("SELECT sql FROM sqlite_schema WHERE name = 'contests'").fetchone()[0]
+                dependent_sql = [row[0] for row in db.execute(
+                    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'contests' AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+                )]
+                db.execute(definition.replace("CREATE TABLE contests", "CREATE TABLE contests_v15", 1)
+                           .replace("env_max BETWEEN 1 AND 800", "env_max BETWEEN 1 AND 500"))
+                db.execute("INSERT INTO contests_v15 SELECT * FROM contests")
+                db.execute("DROP TABLE contests")
+                db.execute("ALTER TABLE contests_v15 RENAME TO contests")
+                for statement in dependent_sql:
+                    db.execute(statement)
+                db.execute("UPDATE sqlite_sequence SET seq = 100 WHERE name = 'contests'")
+                db.execute("PRAGMA user_version = 15")
+            with self.assertRaises(sqlite3.IntegrityError):
+                db.execute("UPDATE contests SET env_max = 800 WHERE id = ?", (contest_id,))
+
+        upgraded = create_app({**self.settings, "ADMIN_PASSWORD": ""})
+        admin = self.login("arenaops", upgraded)
+        self.assertEqual(self.lookup("PRAGMA user_version")[0][0], SCHEMA_VERSION)
+        self.assertEqual(tuple(self.lookup("SELECT * FROM contests WHERE id = ?", (contest_id,))[0]), tuple(original))
+        self.assertEqual(self.lookup("SELECT seq FROM sqlite_sequence WHERE name = 'contests'")[0][0], 100)
+        self.assertEqual(self.lookup("SELECT puzzle_id FROM contest_puzzles WHERE contest_id = ?", (contest_id,))[0][0], puzzle_id)
+        self.assertEqual(self.lookup("SELECT team_id FROM memberships WHERE contest_id = ?", (contest_id,))[0][0], team_id)
+        self.assertEqual(self.lookup("PRAGMA foreign_key_check"), [])
+        self.assertEqual(
+            {row[0] for row in self.lookup("SELECT name FROM sqlite_schema WHERE name IN ('one_active_contest', 'remove_contest_cover')")},
+            {"one_active_contest", "remove_contest_cover"},
+        )
+
+        route = f"/manage/contests/{contest_id}/edit"
+        timezone = self.app.config["TIME_ZONE"]
+        fields = {
+            "mode": "puzzle", "title": original["title"],
+            "start_at": datetime.fromtimestamp(original["start_at"], timezone).strftime("%Y-%m-%dT%H:%M"),
+            "end_at": datetime.fromtimestamp(original["end_at"], timezone).strftime("%Y-%m-%dT%H:%M"),
+        }
+        self.post(admin, route, env_max=801, code=400, **fields)
+        self.post(admin, route, env_max=800, **fields)
+        self.post(admin, route, summary="更新比赛简介", **fields)
+        self.assertEqual(tuple(self.lookup("SELECT env_max, env_ttl_minutes FROM contests")[0]), (800, 180))
+        self.assertRegex(admin.get(route).get_data(as_text=True), r'name="env_max"[^>]*value="800"[^>]*max="800"')
+        with closing(connect(self.app.config["DATABASE"])) as db, self.assertRaises(sqlite3.IntegrityError):
+            db.execute("UPDATE contests SET env_max = 801 WHERE id = ?", (contest_id,))
 
     def test_scheduled_access_and_persistence(self):
         contest_id = self.contest(upcoming=True)

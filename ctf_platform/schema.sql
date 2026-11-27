@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS contests (
     env_image TEXT,
     env_container_port INTEGER CHECK (env_container_port IS NULL OR env_container_port BETWEEN 1 AND 65535),
     env_ttl_minutes INTEGER CHECK (env_ttl_minutes IS NULL OR env_ttl_minutes BETWEEN 5 AND 1440),
-    env_max INTEGER CHECK (env_max IS NULL OR env_max BETWEEN 1 AND 500),
+    env_max INTEGER CHECK (env_max IS NULL OR env_max BETWEEN 1 AND 800),
     cover_id INTEGER REFERENCES uploads(id),
     active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
     created_at INTEGER NOT NULL,

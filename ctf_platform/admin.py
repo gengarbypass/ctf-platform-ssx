@@ -31,6 +31,8 @@ def purge_environments(env_rows):
 
 manage = Blueprint("manage", __name__, url_prefix="/manage")
 
+MAX_CONTEST_ENVIRONMENTS = 800
+
 TEAM_DELETE_IMPACT = (
     "将从全局名册和所有比赛中移除所选队伍，解除成员分队并清理队伍的提交、补丁、积分、服务状态和动态环境。"
     "其他队伍对这些队伍的攻击提交记录也会删除，已获攻击积分继续计入原成绩。"
@@ -127,7 +129,8 @@ def contest_edit(contest_id):
     if contest_id is not None and contest is None:
         abort(404)
     if request.method == "GET":
-        return render_template("manage/contest_form.html", title="编辑比赛" if contest else "创建比赛", contest=contest)
+        return render_template("manage/contest_form.html", title="编辑比赛" if contest else "创建比赛",
+                               contest=contest, max_environments=MAX_CONTEST_ENVIRONMENTS)
     mode = choice_field("mode", "比赛模式", CONTEST_MODES)
     title = text_field("title", "比赛标题", 80)
     summary = text_field("summary", "比赛简介", 1000, optional=True)
@@ -146,7 +149,7 @@ def contest_edit(contest_id):
         if request.form.get("env_ttl_minutes", "").strip():
             env_ttl_minutes = integer_field("env_ttl_minutes", "环境时长", 5, 1440)
         if request.form.get("env_max", "").strip():
-            env_max = integer_field("env_max", "环境上限", 1, 500)
+            env_max = integer_field("env_max", "环境上限", 1, MAX_CONTEST_ENVIRONMENTS)
     if end_at <= start_at:
         raise FormError("结束时间须晚于开赛时间。")
     cover = crop_cover(read_upload(request.files.get("cover"), "cover"), request.form)
@@ -158,6 +161,11 @@ def contest_edit(contest_id):
                 abort(404)
             if contest["active"] and mode != contest["mode"]:
                 raise FormError("请先撤下比赛，再修改比赛模式。")
+            if mode in ("puzzle", "breach"):
+                if "env_ttl_minutes" not in request.form:
+                    env_ttl_minutes = contest["env_ttl_minutes"]
+                if "env_max" not in request.form:
+                    env_max = contest["env_max"]
             if mode != "round":
                 round_seconds = contest["round_seconds"]
             last_round = db.execute("SELECT MAX(round_no) FROM score_events WHERE contest_id = ?", (contest_id,)).fetchone()[0]

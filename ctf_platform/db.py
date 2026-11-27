@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash
 from .domain import username_value, validate_password
 
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 REBUILT_TABLES = (
     "contests", "users", "teams", "memberships", "puzzles", "puzzle_files", "target_flags", "flag_submissions",
     "contest_puzzles", "contest_teams", "breach_flags", "breach_submissions", "breach_environments",
@@ -92,6 +92,21 @@ def rebuild_tables(connection, schema):
     # Recreate indexes whose names were still in use by the old tables.
     for statement in schema:
         connection.execute(statement)
+
+
+def rebuild_contests(connection, schema):
+    prefix = "CREATE TABLE IF NOT EXISTS contests ("
+    definition = next(statement for statement in schema if statement.lstrip().startswith(prefix))
+    sequence = connection.execute("SELECT seq FROM sqlite_sequence WHERE name = 'contests'").fetchone()
+    # Create the replacement first so existing foreign keys keep pointing to contests.
+    connection.execute(definition.replace(prefix, "CREATE TABLE contests_new (", 1))
+    columns = ", ".join(row["name"] for row in connection.execute("PRAGMA table_info(contests_new)"))
+    connection.execute(f"INSERT INTO contests_new ({columns}) SELECT {columns} FROM contests")
+    connection.execute("DROP TABLE contests")
+    connection.execute("ALTER TABLE contests_new RENAME TO contests")
+    if sequence is not None:
+        connection.execute("DELETE FROM sqlite_sequence WHERE name = 'contests'")
+        connection.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('contests', ?)", (sequence["seq"],))
 
 
 def table_columns(connection, table):
@@ -235,7 +250,7 @@ def prepare_schema(connection):
                     connection.execute(
                         "INSERT OR IGNORE INTO contest_teams (contest_id, team_id) "
                         "SELECT contest_id, id FROM teams WHERE contest_id IS NOT NULL")
-            if version:
+            if 1 <= version <= 14:
                 for table in ("flag_submissions", "breach_environments"):
                     add_column(connection, table, "flag_round INTEGER NOT NULL DEFAULT 0 CHECK (flag_round >= 0)")
                 add_column(connection, "breach_environments", "restart_requested INTEGER NOT NULL DEFAULT 0 CHECK (restart_requested IN (0, 1))")
@@ -245,10 +260,12 @@ def prepare_schema(connection):
             if 1 <= version <= 12:
                 rebuild_tables(connection, schema)
             else:
+                if 13 <= version <= 15 and table_columns(connection, "contests") is not None:
+                    rebuild_contests(connection, schema)
                 for statement in schema:
                     connection.execute(statement)
             add_column(connection, "site_settings", "home_background_id INTEGER REFERENCES uploads(id)")
-            if version:
+            if 1 <= version <= 14:
                 # 已计分的动态 Flag 归入原提交回合，避免升级后在同回合再次计分。
                 connection.execute(
                     """UPDATE flag_submissions AS f

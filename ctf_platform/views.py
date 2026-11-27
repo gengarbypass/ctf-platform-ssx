@@ -586,7 +586,7 @@ def ensure_environment_row(db, *, contest, team, puzzle_id, now):
         "SELECT COUNT(*) FROM breach_environments WHERE contest_id = ? AND status IN ('starting', 'running')",
         (contest["id"],),
     ).fetchone()[0]
-    if not env and live_count >= (contest["env_max"] or 20):
+    if live_count >= (contest["env_max"] or 20) and (env is None or env["status"] != "starting"):
         raise FormError("环境并发已达上限，请稍后重试或联系赛事人员。")
     secret = env["secret"] if env else secrets.token_hex(32)
     # 每次重启都分配全新端口（永不复用历史端口）；secret 不变则 Flag 保持稳定
