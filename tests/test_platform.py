@@ -376,7 +376,7 @@ class PlatformTest(unittest.TestCase):
         board = player.get("/api/scoreboard/round").json["content"]
         self.assertIn('data-sb-value="35"', board)
         self.assertIn('data-sb-health="healthy"', board)
-        self.assertIn("选手加固得分", board)
+        self.assertIn("选手攻击/加固得分", board)
         self.assertIn("复核退回", player.get("/submissions?kind=patch").get_data(as_text=True))
         for page in ("/awdp", "/awdp?view=teams", "/awdp?view=patches", "/awdp?view=tasks", f"/awdp/challenges/{task_id}"):
             self.assertEqual(player.get(page).status_code, 200, page)
@@ -814,6 +814,7 @@ class PlatformTest(unittest.TestCase):
         self.post(other, f"/awdp/targets/{static_id}/flag", flag="flag{static_target}", follow=True, code=200)
         self.assertEqual([tuple(r) for r in self.lookup("SELECT kind, delta, round_no FROM score_events ORDER BY id")],
                          [("attack", 200, 1), ("attack", 120, 1)])
+        attack_board = other.get("/api/scoreboard/round").json["content"]
 
         # 修复文档：ZIP 校验、队伍隔离下载、评审发放加固分
         self.post(other, f"/awdp/targets/{target_id}/fix", version="v1.1",
@@ -830,8 +831,20 @@ class PlatformTest(unittest.TestCase):
         self.post(self.admin, review, contest_id=contest_id, status="passed", award=80, review_notes="加固到位")
         self.assertEqual([tuple(r) for r in self.lookup("SELECT kind, delta, round_no FROM score_events ORDER BY id")],
                          [("attack", 200, 1), ("attack", 120, 1), ("defense", 80, 1)])
+        self.post(self.admin, "/manage/scores", contest_id=contest_id, team_id=team_b, kind="attack",
+                  delta=50, round_no=1, reason="队伍调分")
         board = other.get("/api/scoreboard/round").json["content"]
-        self.assertIn('data-sb-value="400"', board)
+        player_key = f"{fix['user_id']}-{team_b}"
+        self.assertEqual(re.findall(r'data-sb-player="([^"]+)"', board), [player_key])
+        attack_row = re.search(rf'<tr data-sb-player="{player_key}"[^>]*>(.*?)</tr>', attack_board, re.S)
+        self.assertIsNotNone(attack_row)
+        self.assertIn("320 / 0", attack_row.group(1))
+        self.assertIn('data-sb-value="320"', attack_row.group(1))
+        combined_row = re.search(rf'<tr data-sb-player="{player_key}"[^>]*>(.*?)</tr>', board, re.S)
+        self.assertIsNotNone(combined_row)
+        self.assertIn("320 / 80", combined_row.group(1))
+        self.assertIn('data-sb-value="400"', combined_row.group(1))
+        self.assertIn('data-sb-value="450"', board)
 
         # 记录页双类型切换与靶机附件下载
         flag_records_page = other.get("/submissions?kind=flag").get_data(as_text=True)
@@ -1915,7 +1928,7 @@ class PlatformTest(unittest.TestCase):
 
     def test_scoreboards_have_independent_blue_white_layouts(self):
         contest_id = self.contest()
-        for team in ("BlueFox", "NullByte", "PacketLab"):
+        for team in ("BlueFox", "NullByte", "PacketLab", "ZeroDay"):
             self.post(self.admin, "/manage/teams/new", contest_id=contest_id, name=team)
         puzzle = self.admin.get("/scoreboard/puzzle").get_data(as_text=True)
         self.assertIsNone(self.admin.get("/api/scoreboard/round").json["timing"]["id"])
@@ -1936,7 +1949,8 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("选手得分排行", puzzle)
         self.assertIn("解出动态", puzzle)
         self.assertNotIn("服务状态", puzzle)
-        self.assertIn("选手加固得分", rounds)
+        self.assertIn("选手攻击/加固得分", rounds)
+        self.assertRegex(rounds, r'<tr data-sb-team="\d+" data-sb-rank="4">')
         self.assertIn("本回合剩余", rounds)
         self.assertIn("服务状态", rounds)
 

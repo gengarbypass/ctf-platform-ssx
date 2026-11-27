@@ -35,19 +35,20 @@
   </section>
 {%- endmacro -%}
 {%- macro players(rows, kind) -%}
-  <section class="sb-panel"><header class="sb-panel-header"><h2>{{ '选手加固得分' if kind == 'round' else '选手得分排行' }}</h2>{% if rows %}<small>TOP {{ rows|length }}</small>{% endif %}</header>
+  {% set title = '选手攻击/加固得分' if kind == 'round' else '选手得分排行' %}
+  <section class="sb-panel"><header class="sb-panel-header"><h2>{{ title }}</h2>{% if rows %}<small>TOP {{ rows|length }}</small>{% endif %}</header>
     {% if rows %}
-      <div class="sb-table-frame"><table class="sb-table" aria-label="{{ '选手个人加固得分排行' if kind == 'round' else '选手个人得分排行' }}">
+      <div class="sb-table-frame"><table class="sb-table" aria-label="{{ title if kind == 'round' else '选手个人得分排行' }}">
         <thead><tr><th scope="col">名次</th><th scope="col">选手</th><th scope="col">队伍</th>
-          {% if kind == 'round' %}<th scope="col" class="sb-number-col">补丁</th>
+          {% if kind == 'round' %}<th scope="col" class="sb-number-col">攻击/加固</th>
           {% else %}<th scope="col" class="sb-number-col">{{ '已解' if kind == 'puzzle' else '已获' }}</th>{% endif %}
-          <th scope="col" class="sb-number-col">积分</th><th scope="col" class="sb-number-col">名次变化</th>
+          <th scope="col" class="sb-number-col">{{ '合计' if kind == 'round' else '积分' }}</th><th scope="col" class="sb-number-col">名次变化</th>
         </tr></thead>
         <tbody>{% for player in rows %}<tr data-sb-player="{{ player.user_id }}-{{ player.team_id }}" data-sb-rank="{{ loop.index }}">
           <td><span class="sb-rank">#{{ '%02d'|format(loop.index) }}</span></td>
           <td><strong class="sb-name">{{ player.name }}</strong></td>
           <td><span class="sb-player-team">{{ player.team_name }}</span></td>
-          {% if kind == 'round' %}<td class="sb-number-col"><span class="sb-solve-count">{{ player.patches }} 个</span></td>
+          {% if kind == 'round' %}<td class="sb-number-col">{{ '{:,}'.format(player.attack) }} / {{ '{:,}'.format(player.defense) }}</td>
           {% else %}<td class="sb-number-col"><span class="sb-solve-count">{{ player.solved }} {{ '题' if kind == 'puzzle' else '个' }}</span></td>{% endif %}
           <td class="sb-number-col">{{ score(player.points) }}</td><td class="sb-number-col">{{ shift() }}</td>
         </tr>{% endfor %}</tbody>

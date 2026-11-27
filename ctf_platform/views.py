@@ -18,8 +18,8 @@ from .domain import (
 )
 from .range import RangeError, remove_environment_instance, start_environment, stop_environment
 from .queries import (
-    add_score, breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
-    patch_records, puzzle_player_rankings, puzzle_rankings, rival_count, round_rankings, round_targets, round_trend,
+    add_score, breach_player_rankings, breach_rankings, breach_records, flag_records, patch_records,
+    puzzle_player_rankings, puzzle_rankings, rival_count, round_player_rankings, round_rankings, round_targets, round_trend,
     score_records, service_matrix, target_award_status, target_awards, target_breaches, target_claims, target_flags, team_list,
 )
 from .storage import read_upload, save_upload, serve_upload
@@ -1217,7 +1217,7 @@ def board_snapshot(kind):
                 matrix = service_matrix(db, contest_id) if state["status"] != "upcoming" else None
                 data.update(teams=round_rankings(db, contest_id), matrix=matrix,
                             events=score_records(db, contest_id, round_no=state["round"], limit=5),
-                            players=patch_player_rankings(db, contest_id))
+                            players=round_player_rankings(db, contest_id))
     clock_label, clock_end = "赛事未开启", now
     round_label = ""
     if state and kind == "round":

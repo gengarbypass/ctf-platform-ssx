@@ -8,7 +8,7 @@
 {%- endmacro %}
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='scoreboard.css') }}{{ asset_version }}">{% endblock %}
 {% block shell %}
-  <div id="ctf-scoreboard" data-board-api="{{ url_for('site.scoreboard_data',kind=kind) }}"
+  <div id="ctf-scoreboard" data-board-kind="{{ kind }}" data-board-api="{{ url_for('site.scoreboard_data',kind=kind) }}"
     data-board-poll="{{ poll_seconds }}" data-board-timing='{{ timing|tojson }}' data-board-hours="{{ '1' if kind != 'round' else '0' }}" aria-label="计分板大屏">
     <main class="sb-inner">
       <div class="sb-chrome">

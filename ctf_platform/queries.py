@@ -28,17 +28,24 @@ def puzzle_player_rankings(db, contest_id):
     ).fetchall()
 
 
-def patch_player_rankings(db, contest_id):
+def round_player_rankings(db, contest_id):
     return db.execute(
-        """SELECT p.user_id, t.id AS team_id, COALESCE(u.display_name, '已删除账号') AS name, t.name AS team_name,
-                  COUNT(p.id) AS patches, COALESCE(SUM(p.award), 0) AS points
-           FROM patches p JOIN teams t ON t.id = p.team_id LEFT JOIN users u ON u.id = p.user_id
-           WHERE p.contest_id = ?
-           GROUP BY p.user_id, t.id
-           ORDER BY points DESC, MAX(p.submitted_at) FILTER (WHERE p.award > 0) ASC NULLS LAST,
-                    MAX(p.id) FILTER (WHERE p.award > 0), t.id, p.user_id
+        """WITH submissions AS (
+               SELECT f.user_id, f.team_id, f.points AS attack, 0 AS defense, f.submitted_at, f.id AS submission_id
+               FROM flag_submissions f JOIN puzzles z ON z.id = f.puzzle_id AND z.kind = 'round'
+               WHERE f.contest_id = ? AND f.verdict = 'correct'
+               UNION ALL
+               SELECT p.user_id, p.team_id, 0, p.award, p.submitted_at, p.id
+               FROM patches p WHERE p.contest_id = ?
+           )
+           SELECT s.user_id, t.id AS team_id, COALESCE(u.display_name, '已删除账号') AS name, t.name AS team_name,
+                  SUM(s.attack) AS attack, SUM(s.defense) AS defense, SUM(s.attack + s.defense) AS points
+           FROM submissions s JOIN teams t ON t.id = s.team_id LEFT JOIN users u ON u.id = s.user_id
+           GROUP BY s.user_id, t.id
+           ORDER BY points DESC, MAX(s.submitted_at) FILTER (WHERE s.attack + s.defense > 0) ASC NULLS LAST,
+                    MAX(s.submission_id) FILTER (WHERE s.attack + s.defense > 0), t.id, s.user_id
            LIMIT ?""",
-        (contest_id, PLAYER_BOARD_LIMIT),
+        (contest_id, contest_id, PLAYER_BOARD_LIMIT),
     ).fetchall()
 
 
