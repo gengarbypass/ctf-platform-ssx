@@ -8,11 +8,12 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta
-from threading import Barrier
+from itertools import count
+from threading import Barrier, Event
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from docker.errors import APIError
+from docker.errors import APIError, NotFound
 from PIL import Image
 
 from ctf_platform import create_app
@@ -46,7 +47,7 @@ class FakeDocker:
     """记录容器/网络操作的最小 Docker 客户端替身。"""
 
     def __init__(self):
-        self.state = {"runs": [], "networks": [], "network_options": {}}
+        self.state = {"runs": [], "networks": [], "network_options": {}, "removed_containers": set()}
         self.containers = self.Containers(self.state)
         self.networks = self.Networks(self.state)
 
@@ -60,33 +61,42 @@ class FakeDocker:
 
         def get(self, identifier):
             for index, run in enumerate(self.state["runs"], start=1):
-                if identifier in (run.get("name"), f"cid-{index}"):
-                    return SimpleNamespace(id=f"cid-{index}", status="running",
-                                           stop=lambda timeout=10: None, remove=lambda force=False: None)
-            raise LookupError(identifier)
+                container_id = f"cid-{index}"
+                if container_id not in self.state["removed_containers"] and identifier in (run.get("name"), container_id):
+                    return SimpleNamespace(id=container_id, status="running", stop=lambda timeout=10: None,
+                                           remove=lambda force=False: self.state["removed_containers"].add(container_id))
+            raise NotFound(identifier)
 
     class Networks:
         def __init__(self, state):
             self.state = state
+            self.ids = {}
+            self.sequence = count(1)
 
         def create(self, name, **kwargs):
+            self.ids[name] = f"nid-{next(self.sequence)}"
             self.state["networks"].append(name)
             self.state["network_options"][name] = kwargs
-            return SimpleNamespace(id=f"nid-{len(self.state['networks'])}",
-                                   remove=lambda: self.remove(name))
+            return self.get(name)
 
-        def remove(self, name):
+        def remove(self, name, network_id):
+            if self.ids.get(name) != network_id:
+                raise NotFound(network_id)
             self.state["networks"].remove(name)
             del self.state["network_options"][name]
+            del self.ids[name]
 
         def list(self):
             return [SimpleNamespace(attrs={"IPAM": options.get("ipam")})
                     for options in list(self.state["network_options"].values())]
 
-        def get(self, name):
-            if name in self.state["networks"]:
-                return SimpleNamespace(id=name, remove=lambda: self.remove(name))
-            raise LookupError(name)
+        def get(self, identifier):
+            ids = self.ids.copy()
+            name = next((name for name, network_id in ids.items() if network_id == identifier), identifier)
+            if name in ids:
+                network_id = ids[name]
+                return SimpleNamespace(id=network_id, remove=lambda: self.remove(name, network_id))
+            raise NotFound(identifier)
 
 
 class PlatformTest(unittest.TestCase):
@@ -520,7 +530,7 @@ class PlatformTest(unittest.TestCase):
     def test_puzzle_dynamic_environments(self):
         fake = FakeDocker()
         self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
-        contest_id = self.contest("蓝域杯 · 动态解题赛", mode="puzzle")
+        contest_id = self.contest("蓝域杯 · 动态解题赛", mode="puzzle", env_max=2)
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")
         other, other_team = self.player(contest_id, "packetlab", "PacketLab")
         # 创建赛题：保存不触发检测；「检测连通性」按钮走独立接口
@@ -547,28 +557,32 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(run["environment"]["FLAG"], derived)
         self.assertIn(":8400</a>", player.get(f"/challenges/{puzzle_id}").get_data(as_text=True))
 
-        result = self.post(player, f"/challenges/{puzzle_id}/flag", flag=derived, follow=True, code=200)
-        self.assertIn("Flag 正确", result.get_data(as_text=True))
-        # 其他队伍环境的派生 flag 无效（other 解题前先验证跨队派生无效）
         self.post(other, f"/challenges/{puzzle_id}/env/start")
         other_env = self.lookup("SELECT * FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (puzzle_id, other_team))[0]
         self.assertEqual(other_env["host_port"], 8401)
+        result = self.post(player, f"/challenges/{puzzle_id}/flag", flag=derived, follow=True, code=200)
+        solved_page = result.get_data(as_text=True)
+        self.assertIn("Flag 正确", solved_page)
+        self.assertIn("题目环境已关闭", solved_page)
+        self.assertIn("重启环境", solved_page)
+        self.assertNotIn(":8400</a>", solved_page)
+        self.assertEqual(self.lookup("SELECT status FROM breach_environments WHERE id = ?", (env["id"],))[0][0], "stopped")
+        self.assertEqual(fake.state["removed_containers"], {env["container_id"]})
+        self.assertEqual(fake.state["networks"], [f"ctfenv-c{contest_id}-t{other_team}-p{puzzle_id}-net"])
+
+        # 别队提交错误 Flag 后仍可使用自己的环境
         wrong = self.post(other, f"/challenges/{puzzle_id}/flag",
                           flag=derived, follow=True, code=200)
         self.assertIn("Flag 错误", wrong.get_data(as_text=True))
+        self.assertIn(":8401</a>", wrong.get_data(as_text=True))
+        self.assertEqual(self.lookup(
+            "SELECT status FROM breach_environments WHERE id = ?", (other_env["id"],),
+        )[0][0], "running")
         # 静态赛题不受影响
         self.post(player, f"/challenges/{static_id}/flag", flag="flag{fixture}", follow=True, code=200)
         self.assertEqual([tuple(r) for r in self.lookup(
             "SELECT verdict FROM flag_submissions WHERE puzzle_id = ? ORDER BY id", (puzzle_id,))],
             [("correct",), ("incorrect",)])
-        # 停止后环境卡片回到待启动状态
-        self.post(player, f"/challenges/{puzzle_id}/env/stop")
-        self.assertEqual(self.lookup(
-            "SELECT status FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (puzzle_id, team_id))[0][0],
-            "stopped")
-        again = player.get(f"/challenges/{puzzle_id}").get_data(as_text=True)
-        self.assertIn("重启环境", again)
-        self.assertNotIn(":8400</a>", again)
         # 编辑保留动态属性并更新镜像（保存路径不做连通性检测）
         self.post(self.admin, f"/manage/bank/{puzzle_id}/edit",
                   title="容器入口", category="Web", difficulty="入门", points=120,
@@ -606,6 +620,66 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual([tuple(row) for row in self.lookup(
             "SELECT DISTINCT status FROM breach_environments WHERE puzzle_id = ?", (puzzle_id,))], [("stopped",)])
         self.assertEqual(set(fake.state["networks"]) & networks, set())
+
+    def test_solved_puzzle_environment_retries_partial_cleanup(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest()
+        player, team_id = self.player(contest_id, "bluefox", "BlueFox")
+        self.post(self.admin, "/manage/bank/new", join_contest=contest_id, title="解题环境",
+                  category="Web", difficulty="入门", points=100, description="本地测试题",
+                  env_image="nginx:alpine", env_container_port=80, published="1")
+        task_id = self.lookup("SELECT id FROM puzzles")[0][0]
+        path = f"/challenges/{task_id}"
+        self.post(player, f"{path}/env/start")
+        env = self.lookup("SELECT * FROM breach_environments WHERE team_id = ?", (team_id,))[0]
+        value = env_flag_value(env["secret"], env["id"], task_id)
+
+        with patch.object(fake.networks, "get", side_effect=APIError("网络清理暂时失败")), self.assertLogs(self.app.logger, "WARNING"):
+            self.post(player, f"{path}/flag", flag=value)
+        self.assertEqual(fake.state["removed_containers"], {env["container_id"]})
+        self.assertEqual(len(fake.state["networks"]), 1)
+        score = self.lookup("SELECT submitted_at, verdict, points FROM flag_submissions")[0]
+        self.assertEqual((score["verdict"], score["points"]), ("correct", 100))
+        pending = self.lookup("SELECT status, expires_at FROM breach_environments")[0]
+        self.assertEqual(tuple(pending), ("running", score["submitted_at"]))
+
+        page = player.get(path).get_data(as_text=True)
+        self.assertIn("题目环境已关闭", page)
+        self.assertEqual(fake.state["networks"], [])
+        self.assertEqual(self.lookup("SELECT status FROM breach_environments")[0][0], "stopped")
+
+    def test_solved_puzzle_environment_is_closed_when_pending_launch_finishes(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest()
+        player, _ = self.player(contest_id, "bluefox", "BlueFox")
+        starter = self.login("bluefox")
+        self.post(self.admin, "/manage/bank/new", join_contest=contest_id, title="固定 Flag 环境",
+                  category="Web", difficulty="入门", points=100, description="本地测试题",
+                  flag="flag{fixed-fixture}", env_image="nginx:alpine", env_container_port=80, published="1")
+        path = f"/challenges/{self.lookup('SELECT id FROM puzzles')[0][0]}"
+        pending, release = Event(), Event()
+
+        def finish_start(**options):
+            pending.set()
+            self.assertTrue(release.wait(timeout=10))
+            return start_environment(**options)
+
+        with patch("ctf_platform.views.start_environment", side_effect=finish_start), ThreadPoolExecutor(max_workers=1) as pool:
+            launched = pool.submit(self.post, starter, f"{path}/env/start")
+            try:
+                self.assertTrue(pending.wait(timeout=10))
+                self.post(player, f"{path}/flag", flag="flag{fixed-fixture}")
+                self.assertEqual(self.lookup("SELECT status FROM breach_environments")[0][0], "starting")
+            finally:
+                release.set()
+            launched.result(timeout=10)
+
+        self.assertEqual(tuple(self.lookup("SELECT verdict, points FROM flag_submissions")[0]), ("correct", 100))
+        self.assertEqual(self.lookup("SELECT status FROM breach_environments")[0][0], "stopped")
+        self.assertEqual(fake.state["removed_containers"], {"cid-1"})
+        self.assertEqual(fake.state["networks"], [])
 
     def test_awdp_target_attack_and_defense(self):
         fake = FakeDocker()
@@ -933,8 +1007,81 @@ class PlatformTest(unittest.TestCase):
             "SELECT round_no, SUM(delta) FROM score_events WHERE team_id = ? GROUP BY round_no ORDER BY round_no", (player_id,),
         )], [(1, 375), (2, 350)])
 
+    def test_awdp_first_claim_is_shared_by_all_teams_for_each_round(self):
+        fake = FakeDocker()
+        self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
+        contest_id = self.contest("首个有效提交", mode="round", active=False)
+        defender, defender_id = self.player(contest_id, "defender", "Defender")
+        other, other_id = self.player(contest_id, "bluefox", "BlueFox")
+        third, third_id = self.player(contest_id, "packetlab", "PacketLab")
+        target_id = self.awdp_target(contest_id, env_image="nginx:alpine", flags=[
+            ("靶点甲", 100, ""), ("靶点乙", 200, ""),
+        ])
+        first_id, second_id = (row["id"] for row in self.lookup(
+            "SELECT id FROM target_flags WHERE puzzle_id = ? ORDER BY id", (target_id,),
+        ))
+        timing = self.lookup("SELECT start_at, round_seconds FROM contests WHERE id = ?", (contest_id,))[0]
+        boundary = timing["start_at"] + timing["round_seconds"]
+        page = f"/awdp/targets/{target_id}"
+
+        def flag_for(victim, slot):
+            env = self.lookup(
+                "SELECT * FROM breach_environments WHERE puzzle_id = ? AND team_id = ?", (target_id, victim),
+            )[0]
+            return awdp_flag_value(env, slot, kind="target")
+
+        def submit(client, value):
+            return self.post(client, f"{page}/flag", flag=value, follow=True, code=200).get_data(as_text=True)
+
+        with patch("time.time", return_value=boundary - 2):
+            self.post(self.admin, f"/manage/contests/{contest_id}/activate")
+            first_flag = flag_for(defender_id, first_id)
+            barrier = Barrier(2)
+
+            def race(client):
+                barrier.wait(timeout=10)
+                return submit(client, first_flag)
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(race, (other, third)))
+            self.assertEqual(sum("100 攻击积分" in result for result in results), 1)
+            self.assertEqual(sum("该靶点已被其他队伍攻破" in result for result in results), 1)
+            winner_index = next(index for index, result in enumerate(results) if "100 攻击积分" in result)
+            participants = ((other, other_id), (third, third_id))
+            winner, winner_id = participants[winner_index]
+            loser, loser_id = participants[1 - winner_index]
+            rejected = results[1 - winner_index]
+            self.assertIn("本回合已攻破靶点", rejected)
+            self.assertIn('1/2 枚<br><small class="arena-muted">靶点甲</small>', rejected)
+            self.assertNotIn(">被攻破</span>", defender.get(page).get_data(as_text=True))
+            submissions = self.lookup(
+                "SELECT team_id, verdict, points FROM flag_submissions WHERE target_flag_id = ? ORDER BY id", (first_id,),
+            )
+            self.assertEqual([tuple(row) for row in submissions], [
+                (winner_id, "correct", 100), (loser_id, "already_solved", 0),
+            ])
+
+            self.post(defender, f"{page}/env/start")
+            self.assertIn("该靶点已被其他队伍攻破", submit(loser, flag_for(defender_id, first_id)))
+            self.assertIn("靶机状态为「被攻破」", submit(loser, flag_for(defender_id, second_id)))
+            for route in (page, "/awdp?view=tasks"):
+                self.assertIn(">被攻破</span>", defender.get(route).get_data(as_text=True))
+            self.assertIn("100 攻击积分", submit(defender, flag_for(other_id, first_id)))
+
+        with patch("time.time", return_value=boundary + 2):
+            sync_active_awdp(self.app)
+            self.assertNotIn(">被攻破</span>", defender.get(page).get_data(as_text=True))
+            self.assertIn("Flag 错误", submit(loser, first_flag))
+            next_flag = flag_for(defender_id, first_id)
+            self.assertIn("100 攻击积分", submit(loser, next_flag))
+            self.assertIn("该靶点已被其他队伍攻破", submit(winner, next_flag))
+
+        self.assertEqual([tuple(row) for row in self.lookup(
+            "SELECT team_id, round_no, delta FROM score_events ORDER BY id",
+        )], [(winner_id, 1, 100), (loser_id, 1, 200), (defender_id, 1, 100), (loser_id, 2, 100)])
+
     def test_awdp_target_attack_counts_every_rival_team(self):
-        """每支队伍都可以提交其他队伍每台靶机的全部 Flag：同一台靶机攻破几支对手队伍就计几次。"""
+        """各对手队伍的实例分别计分，同一实例只接受首个有效提交。"""
         fake = FakeDocker()
         self.app.config["RANGE_DOCKER_FACTORY"] = lambda: fake
         contest_id = self.contest("蓝域杯 · 全对手攻防赛", mode="round")
@@ -959,6 +1106,8 @@ class PlatformTest(unittest.TestCase):
         self.assertIn('name="flag"', first)
         repeat = self.post(other, f"{page}/flag", flag=derived(plain_id, team_a), follow=True, code=200).get_data(as_text=True)
         self.assertIn("该靶机已被本队攻破", repeat)
+        blocked = self.post(third, f"{page}/flag", flag=derived(plain_id, team_a), follow=True, code=200).get_data(as_text=True)
+        self.assertIn("该靶机已被其他队伍攻破", blocked)
         # C 队靶机上的 Flag 是另一枚：照常计分，全部对手攻破后才收起表单；队友同时提交也只计一次
         teammate = self.login("packetlab")
         barrier = Barrier(2)
@@ -1017,7 +1166,7 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("<dt>攻破队伍</dt><dd>1 队</dd>", untouched)
         self.assertIn('data-sb-value="1200"', other.get("/api/scoreboard/round").json["content"])
 
-        # 数据库层兜底：同一对手同一靶点只允许一条正确记录，不同对手各自一条
+        # 模拟早期版本给不同队伍计分的历史记录。现有索引仍约束同队重复得分，跨队提交在判题事务中处理。
         insert = """INSERT INTO flag_submissions (contest_id, puzzle_id, target_flag_id, team_id, victim_team_id,
                                                   flag_round, verdict, points, submitted_at)
                     VALUES (?, ?, ?, ?, ?, 1, 'correct', 0, 0)"""
@@ -1027,6 +1176,8 @@ class PlatformTest(unittest.TestCase):
             db.execute(insert, (contest_id, multi_id, sql_id, team_c, team_a))
             with self.assertRaises(sqlite3.IntegrityError):
                 db.execute(insert, (contest_id, multi_id, sql_id, team_c, team_a))
+        replay = self.post(third, f"{page}/flag", flag=derived(multi_id, team_a, sql_id), follow=True, code=200)
+        self.assertIn("该靶点已被本队攻破", replay.get_data(as_text=True))
 
         # 删除被攻破的队伍：针对它的攻击记录一并删除，攻击方已获积分保留
         self.post(self.admin, f"/manage/teams/{team_c}/delete")
@@ -1242,6 +1393,9 @@ class PlatformTest(unittest.TestCase):
         first = self.post(player, f"{page}/flag", flag="flag{b}", follow=True, code=200).get_data(as_text=True)
         self.assertIn("200 攻击积分", first)
         self.assertNotIn(">被攻破</span>", first)
+        self.assertIn("200 攻击积分", self.post(
+            other, f"{page}/flag", flag="flag{b}", follow=True, code=200,
+        ).get_data(as_text=True))
         self.assertIn(">已获取 1/2 枚</span>", player.get(board).get_data(as_text=True))
         repeat = self.post(player, f"{page}/flag", flag="flag{b}", follow=True, code=200).get_data(as_text=True)
         self.assertIn("本队已经获得该靶点积分", repeat)

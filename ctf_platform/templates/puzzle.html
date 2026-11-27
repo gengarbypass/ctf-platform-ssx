@@ -69,6 +69,9 @@
     {% set correct = notice.verdict == 'correct' %}
     {% set label = "Flag 正确" if correct else "Flag 错误" if notice.verdict == 'incorrect' else "本题已解出" %}
     {% set message = "本队获得 " ~ notice.points ~ " 分，积分已更新。" if correct else "答案未通过判定，请核对后重试。" if notice.verdict == 'incorrect' else "本队已经获得该题积分。" %}
+    {% if notice.closing_environment and environment and environment.status == 'stopped' %}
+      {% set message = message ~ "题目环境已关闭。" %}
+    {% endif %}
     <dialog class="arena-dialog" data-auto-dialog aria-labelledby="flag-result-title">
       <header class="arena-dialog-head"><div><h2 id="flag-result-title">{{ label }}</h2><p>{{ puzzle.title }}</p></div><form method="dialog"><button class="arena-btn" type="submit" aria-label="关闭弹窗">×</button></form></header>
       <div class="arena-dialog-body"><div class="arena-feedback arena-outcome {{ 'success' if correct else 'error' if notice.verdict == 'incorrect' else '' }}" role="status">{{ message }}</div>

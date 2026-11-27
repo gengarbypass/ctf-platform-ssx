@@ -46,12 +46,13 @@
         <section class="arena-attachments" aria-label="其他队伍靶机"><h3>其他队伍在线靶机</h3>
           <p class="arena-muted">每支队伍各有一台靶机实例{% if per_team %}，Flag 互不相同{% endif %}。请勿破坏对手环境以外的平台服务。</p>
           <div class="arena-table-wrap"><table class="arena-table"><caption>在线对手</caption>
-            <thead><tr><th scope="col">队伍</th><th scope="col">靶机地址</th>{% if per_team %}<th scope="col">本队提交进度</th><th scope="col">靶机状态</th>{% endif %}</tr></thead>
+            <thead><tr><th scope="col">队伍</th><th scope="col">靶机地址</th>{% if per_team %}<th scope="col">本队提交进度</th><th scope="col">本回合已攻破靶点</th><th scope="col">靶机状态</th>{% endif %}</tr></thead>
             <tbody>{% for rival in rivals %}<tr>
               <td><strong>{{ rival.team_name }}</strong></td>
               <td><a class="arena-mono" href="http://{{ environment_host }}:{{ rival.host_port }}" target="_blank" rel="noopener">http://{{ environment_host }}:{{ rival.host_port }}</a></td>
               {% if per_team %}
                 <td class="arena-number">{{ rival.obtained }}/{{ flag_total or 1 }} 枚</td>
+                <td class="arena-number">{{ rival.claimed }}/{{ flag_total or 1 }} 枚{% if rival.claimed_titles %}<br><small class="arena-muted">{{ rival.claimed_titles|join('、') }}</small>{% endif %}</td>
                 <td>{{ ui.pill("被攻破", "error") if rival.breached else ui.pill("未攻破", "neutral") }}</td>
               {% endif %}
             </tr>{% endfor %}</tbody>
@@ -100,11 +101,11 @@
         {{ ui.csrf() }}<label class="arena-field">Flag<input class="arena-input arena-mono" name="flag" type="text" placeholder="flag{…}" maxlength="256" spellcheck="false" autocomplete="off" required></label>
         <div class="arena-actions"><button class="arena-btn primary" type="submit">提交 Flag</button></div>
         {% if flags and per_team %}
-        <small class="arena-muted">提交本回合的正确 Flag 可获得对应靶点积分。同一对手的同一靶点每回合计分一次。</small>
+        <small class="arena-muted">同一对手的同一靶点，每回合由首个提交有效 Flag 的队伍得分。</small>
         {% elif flags %}
         <small class="arena-muted">提交正确 Flag 即可获得对应靶点积分，每队每个靶点计分一次。</small>
         {% elif per_team %}
-        <small class="arena-muted">提交其他队伍靶机的本回合 Flag 可获得攻击积分，每支对手队伍的靶机每回合计分一次。</small>
+        <small class="arena-muted">每台对手靶机在本回合的积分归首个提交有效 Flag 的队伍。</small>
         {% else %}
         <small class="arena-muted">提交正确的 Flag 即可获得攻击积分；本队每台靶机只计一次。</small>
         {% endif %}
@@ -128,10 +129,13 @@
   {% if notice %}
     {% set correct = notice.verdict == 'correct' %}
     {% set repeated = notice.verdict == 'already_solved' %}
-    {% set label = "Flag 正确" if correct else "Flag 错误" if not repeated else "该靶点已被本队攻破" if notice.title else "该靶机已被本队攻破" %}
+    {% set claimed_by_other = notice.claimed_by_other %}
+    {% set subject = "该靶点" if notice.title else "该靶机" %}
+    {% set label = "Flag 正确" if correct else "Flag 错误" if not repeated else subject ~ ("已被其他队伍攻破" if claimed_by_other else "已被本队攻破") %}
     {% set message = "本队获得 " ~ notice.points ~ " 攻击积分，积分已更新。" ~ (" 靶机状态为「被攻破」。" if notice.breached else "") if correct
                       else "不能提交本队靶机的 Flag，请攻击其他队伍的靶机。" if notice.own_flag
                       else "答案未通过判定，请核对后重试。" if not repeated
+                      else "本回合" ~ subject ~ "的积分已发放。" if claimed_by_other
                       else "本队已经获得该靶点积分。" if notice.title
                       else "本队已经攻破「" ~ notice.victim ~ "」的这台靶机并获得过它的积分，请继续攻击其他对手。" if notice.victim
                       else "本队已经获得该靶机的攻击积分。" %}
@@ -140,7 +144,7 @@
       <div class="arena-dialog-body"><div class="arena-feedback arena-outcome {{ 'success' if correct else 'error' if notice.verdict == 'incorrect' else '' }}" role="status">{{ message }}</div>
         <form class="arena-actions" method="dialog">
           {% if correct %}{{ ui.link("查看排行榜", url_for('site.ranking'), "primary", "next") }}{% endif %}
-          <button type="submit" class="arena-btn {{ '' if correct else 'primary' }}" data-focus-flag>{{ "返回靶机" if correct else "重试" }}</button>
+          <button type="submit" class="arena-btn {{ '' if correct or claimed_by_other else 'primary' }}" data-focus-flag>{{ "返回靶机" if correct or claimed_by_other else "重试" }}</button>
         </form>
       </div>
     </dialog>

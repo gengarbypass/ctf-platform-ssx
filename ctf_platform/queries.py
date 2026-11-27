@@ -182,16 +182,29 @@ def target_awards(db, contest_id, puzzle_ids, *, round_no):
     return awards
 
 
-def target_awarded(db, contest_id, puzzle_id, flag_id, team_id, victim_id, flag_round):
-    """查询该队在该 Flag 对应的计分范围内是否已获得攻击分。
-
-    flag_id 为空表示未布置靶点的靶机级 Flag；victim_id 为空表示静态 Flag（各队靶机相同，不区分对手）。
-    """
+def target_award_status(db, contest_id, puzzle_id, flag_id, team_id, victim_id, flag_round):
+    """查询靶点是否已得分，以及有效记录中是否包括当前队伍。"""
+    slot = "target_flag_id IS NULL" if flag_id is None else "target_flag_id = :flag_id"
+    scope = "victim_team_id = :victim_id" if victim_id is not None else "victim_team_id IS NULL AND team_id = :team_id"
     return db.execute(
-        """SELECT 1 FROM flag_submissions WHERE contest_id = ? AND puzzle_id = ? AND team_id = ? AND verdict = 'correct'
-           AND target_flag_id IS ? AND victim_team_id IS ? AND flag_round = ? LIMIT 1""",
-        (contest_id, puzzle_id, team_id, flag_id, victim_id, flag_round),
-    ).fetchone() is not None
+        f"""SELECT MAX(team_id = :team_id) AS claimed_by_team FROM flag_submissions
+            WHERE contest_id = :contest_id AND puzzle_id = :puzzle_id AND flag_round = :flag_round
+              AND verdict = 'correct' AND {slot} AND {scope}
+            HAVING COUNT(*) > 0""",
+        {"contest_id": contest_id, "puzzle_id": puzzle_id, "flag_round": flag_round,
+         "flag_id": flag_id, "team_id": team_id, "victim_id": victim_id},
+    ).fetchone()
+
+
+def target_claims(awards, flag_total):
+    """按动态实例汇总已攻破的靶点与已被完整攻破的队伍。"""
+    claims = {}
+    for obtained in awards.values():
+        for flag_id, victim_id in obtained:
+            if victim_id is not None:
+                claims.setdefault(victim_id, set()).add(flag_id)
+    breached = {victim_id for victim_id, slots in claims.items() if len(slots) >= (flag_total or 1)}
+    return claims, breached
 
 
 def target_breaches(awards, flag_total):
@@ -232,9 +245,11 @@ def round_targets(db, contest_id, team_id=None, *, round_no):
     awards = target_awards(db, contest_id, [row["id"] for row in rows], round_no=round_no)
     rivals = rival_count(db, contest_id, team_id)
     for row in rows:
-        breaches = target_breaches(awards[row["id"]], row["flag_total"])
+        target_awards_by_team = awards[row["id"]]
+        breaches = target_breaches(target_awards_by_team, row["flag_total"])
+        _, breached_instances = target_claims(target_awards_by_team, row["flag_total"])
         row["solves"] = len(breaches)
-        row["own_breached"] = row["per_team"] and any(team_id in victims for victims in breaches.values())
+        row["own_breached"] = row["per_team"] and team_id in breached_instances
         if row["flag_total"]:
             row["points"] = row["flag_points"]
         target_rivals = rivals if row["per_team"] else 0
@@ -242,7 +257,7 @@ def round_targets(db, contest_id, team_id=None, *, round_no):
             # 动态靶机按攻破的对手队伍数计；静态靶机没有对手实例，按 Flag 是否全部拿到计
             rivals=target_rivals,
             breached=len(breaches.get(team_id, set()) - {None}),
-            flags=len(awards[row["id"]].get(team_id, set())), need=(row["flag_total"] or 1) * (target_rivals or 1),
+            flags=len(target_awards_by_team.get(team_id, set())), need=(row["flag_total"] or 1) * (target_rivals or 1),
         )
     return rows
 

@@ -5,6 +5,7 @@ CTF_ENV_DOCKER_URL 覆盖（如 Windows Docker Desktop 的 npipe 地址）。
 测试通过 app.config["RANGE_DOCKER_FACTORY"] 注入假客户端，避免真实 Docker 依赖。
 """
 import os
+from contextlib import suppress
 from ipaddress import IPv4Network
 
 from flask import current_app
@@ -49,6 +50,22 @@ def stop_environment(contest_id, team_id, puzzle_id=0, *, container_id=""):
         network.remove()
     except Exception:
         pass
+
+
+def remove_environment_instance(container_id, network_id):
+    """按 Docker ID 回收已分配的实例，避免同名的新实例被一并删除。"""
+    from docker.errors import NotFound
+
+    try:
+        client = docker_client()
+        if container_id:
+            with suppress(NotFound):
+                client.containers.get(container_id).remove(force=True)
+        if network_id:
+            with suppress(NotFound):
+                client.networks.get(network_id).remove()
+    except Exception as error:
+        raise RangeError(f"关闭环境失败：{error}") from error
 
 
 def create_environment_network(client, name, network_name, host_port):

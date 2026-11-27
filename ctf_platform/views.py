@@ -16,11 +16,11 @@ from .domain import (
     CATEGORIES, CHALLENGE_TABLES, CONTEST_MODES, FormError, attack_pill, contest_schedule, contest_state,
     env_flag_value, flag_digest, flag_matches, login_required, local_time, obtained_pill, round_segments, text_field,
 )
-from .range import RangeError, start_environment, stop_environment
+from .range import RangeError, remove_environment_instance, start_environment, stop_environment
 from .queries import (
     add_score, breach_player_rankings, breach_rankings, breach_records, flag_records, patch_player_rankings,
     patch_records, puzzle_player_rankings, puzzle_rankings, rival_count, round_rankings, round_targets, round_trend,
-    score_records, service_matrix, target_awarded, target_awards, target_breaches, target_flags, team_list,
+    score_records, service_matrix, target_award_status, target_awards, target_breaches, target_claims, target_flags, team_list,
 )
 from .storage import read_upload, save_upload, serve_upload
 
@@ -236,6 +236,7 @@ def submission_context(db, mode, task_id):
 def submit_flag(puzzle_id):
     value = text_field("flag", "Flag", 256)
     db = get_db()
+    closing_env = None
     with transaction(db, write=True):
         contest, team, challenge, now = submission_context(db, "puzzle", puzzle_id)
         attempts = db.execute(
@@ -269,7 +270,18 @@ def submit_flag(puzzle_id):
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (contest["id"], puzzle_id, team["id"], g.user["id"], verdict, points, now),
         )
-    session["flag_notice"] = {"puzzle_id": puzzle_id, "verdict": verdict, "points": points}
+        if verdict == "correct":
+            # 和计分一起记录待回收状态，Docker 暂时不可用时也可在下次访问重试。
+            closing_env = db.execute(
+                """UPDATE breach_environments SET expires_at = MIN(COALESCE(expires_at, ?), ?)
+                   WHERE contest_id = ? AND team_id = ? AND puzzle_id = ? AND status IN ('starting', 'running')
+                   RETURNING *""",
+                (now, now, contest["id"], team["id"], puzzle_id),
+            ).fetchone()
+    if closing_env is not None and closing_env["status"] == "running":
+        close_puzzle_instance(db, closing_env, now)
+    session["flag_notice"] = {"puzzle_id": puzzle_id, "verdict": verdict, "points": points,
+                              "closing_environment": closing_env is not None}
     return redirect(url_for("site.puzzle", puzzle_id=puzzle_id), code=303)
 
 
@@ -507,10 +519,28 @@ def allocate_environment_port(db):
     return port
 
 
+def close_puzzle_instance(db, environment, now):
+    try:
+        if environment["network_id"]:
+            remove_environment_instance(environment["container_id"], environment["network_id"])
+        else:
+            stop_environment(environment["contest_id"], environment["team_id"], environment["puzzle_id"],
+                             container_id=environment["container_id"])
+    except RangeError as error:
+        current_app.logger.warning("回收解题环境 %s 失败：%s", environment["id"], error)
+        return
+    with transaction(db, write=True):
+        db.execute(
+            """UPDATE breach_environments SET status = 'stopped', stopped_at = ?
+               WHERE id = ? AND host_port IS ? AND status = 'running'""",
+            (now, environment["id"], environment["host_port"]),
+        )
+
+
 def sweep_environments(db, now):
-    """惰性清理：过期或所属比赛不再进行中的环境；Docker 故障记入 error 不阻塞页面。"""
+    """惰性清理过期或所属比赛不再进行中的环境。"""
     rows = db.execute(
-        """SELECT e.*, c.active, c.start_at, c.end_at FROM breach_environments e
+        """SELECT e.*, c.mode, c.active, c.start_at, c.end_at FROM breach_environments e
            JOIN contests c ON c.id = e.contest_id WHERE e.status IN ('starting', 'running')""",
     ).fetchall()
     for row in rows:
@@ -518,17 +548,24 @@ def sweep_environments(db, now):
         expired = row["expires_at"] is not None and row["expires_at"] <= now
         if contest_live and not expired:
             continue
+        if row["mode"] == "puzzle" and row["status"] == "running":
+            close_puzzle_instance(db, row, now)
+            continue
         try:
             # 赛题/靶机环境的容器与网络名带题号：按记录里的题号定位，才能连专属网络一并移除
             stop_environment(row["contest_id"], row["team_id"], row["puzzle_id"], container_id=row["container_id"])
             with transaction(db, write=True):
                 db.execute(
-                    "UPDATE breach_environments SET status = 'stopped', stopped_at = ? WHERE id = ?", (now, row["id"]),
+                    """UPDATE breach_environments SET status = 'stopped', stopped_at = ?
+                       WHERE id = ? AND host_port IS ? AND status = ?""",
+                    (now, row["id"], row["host_port"], row["status"]),
                 )
         except RangeError as error:
             with transaction(db, write=True):
                 db.execute(
-                    "UPDATE breach_environments SET status = 'error', last_error = ? WHERE id = ?", (str(error), row["id"]),
+                    """UPDATE breach_environments SET status = 'error', last_error = ?
+                       WHERE id = ? AND host_port IS ? AND status = ?""",
+                    (str(error), row["id"], row["host_port"], row["status"]),
                 )
 
 
@@ -619,14 +656,27 @@ def launch_environment(db, *, contest, team, env_id, puzzle_id, image, container
     with transaction(db, write=True):
         if error:
             db.execute(
-                "UPDATE breach_environments SET status = 'error', last_error = ?, stopped_at = ? WHERE id = ?",
-                (error, now, env_id),
+                """UPDATE breach_environments SET status = 'error', last_error = ?, stopped_at = ?
+                   WHERE id = ? AND host_port = ? AND status = 'starting'""",
+                (error, now, env_id, host_port),
             )
         else:
-            db.execute(
-                "UPDATE breach_environments SET status = 'running', container_id = ?, network_id = ?, started_at = ? WHERE id = ?",
-                (container_id, network_id, now, env_id),
-            )
+            environment = db.execute(
+                """UPDATE breach_environments SET status = 'running', container_id = ?, network_id = ?, started_at = ?
+                   WHERE id = ? AND host_port = ? AND status = 'starting' RETURNING *""",
+                (container_id, network_id, now, env_id, host_port),
+            ).fetchone()
+    if not error:
+        if environment is None:
+            # 启动期间若记录已被停止或替换，只清理本次启动的实例。
+            try:
+                remove_environment_instance(container_id, network_id)
+            except RangeError as failure:
+                current_app.logger.warning("回收已取消的环境 %s 失败：%s", env_id, failure)
+        elif contest["mode"] == "puzzle" and environment["expires_at"] is not None:
+            finished = int(time.time())
+            if environment["expires_at"] <= finished:
+                close_puzzle_instance(db, environment, finished)
     return redirect(done_url, code=303)
 
 
@@ -709,7 +759,10 @@ def stop_puzzle_environment(puzzle_id):
             "UPDATE breach_environments SET status = 'stopped', stopped_at = ? WHERE id = ?", (now, env["id"]),
         )
     try:
-        stop_environment(contest["id"], team["id"], task["id"], container_id=env["container_id"])
+        if env["network_id"]:
+            remove_environment_instance(env["container_id"], env["network_id"])
+        else:
+            stop_environment(contest["id"], team["id"], task["id"], container_id=env["container_id"])
     except RangeError:
         pass
     return redirect(url_for("site.puzzle", puzzle_id=puzzle_id), code=303)
@@ -880,7 +933,7 @@ def round_target(target_id):
     flags = [dict(flag) for flag in target_flags(db, target_id)]
     awards = target_awards(db, contest_id, [target_id], round_no=g.match["round"])[target_id]
     breaches = target_breaches(awards, len(flags))
-    breached_teams = {victim for victims in breaches.values() for victim in victims if victim is not None}
+    claims, breached_teams = target_claims(awards, len(flags))
     team_breaches = breaches.get(team_id, set())
     mine = awards.get(team_id, set())
     # 动态靶机每支队伍各有一个实例：按攻破了几支对手队伍的靶机计进度；静态靶机没有对手实例，只看 Flag 是否拿全
@@ -907,7 +960,7 @@ def round_target(target_id):
             refreshing = bool(environment and g.match["status"] == "live" and (
                 environment["restart_requested"] or environment["flag_round"] != flag_round
             ))
-            # 其他队伍的在线靶机：展示本队提交进度及该实例是否已被完整攻破
+            # 同时展示本队的得分进度和每台实例已被全场攻破的靶点。
             rivals = [dict(row) for row in db.execute(
                 """SELECT e.team_id, e.host_port, t.name AS team_name FROM breach_environments e
                    JOIN teams t ON t.id = e.team_id
@@ -919,14 +972,17 @@ def round_target(target_id):
             ).fetchall()]
             obtained_by_rival = Counter(victim for _, victim in mine)
             for rival in rivals:
+                claimed_slots = claims.get(rival["team_id"], set())
                 rival["obtained"] = obtained_by_rival[rival["team_id"]]
+                rival["claimed"] = len(claimed_slots)
+                rival["claimed_titles"] = [flag["title"] for flag in flags if flag["id"] in claimed_slots]
                 rival["breached"] = rival["team_id"] in breached_teams
     notice = session.pop("flag_notice", None)
     if notice:
         if notice["puzzle_id"] != target_id or notice.get("flag_round", 0) not in (0, g.match["round"]):
             notice = None
         elif notice["verdict"] == "correct":
-            notice["breached"] = notice.get("victim_id") in team_breaches
+            notice["breached"] = notice.get("victim_id") in (breached_teams if per_team else team_breaches)
     return render_template("target.html", title=target["title"], target=target, files=files, solves=len(breaches),
                            state=state, done=state[0] == "success", history=history, notice=notice,
                            environment=environment, refreshing=refreshing, rivals=rivals, flags=flags, flag_total=len(flags),
@@ -985,8 +1041,12 @@ def submit_target_flag(target_id):
         title = hit["title"] if matched and flags else ""
         victim_id = victim["team_id"] if victim else None
         victim_name = victim["team_name"] if victim else ""
-        prior = matched and target_awarded(db, contest["id"], target_id, flag_id, team["id"], victim_id, flag_round)
-        if prior:
+        # 在同一个写事务内检查首个得分队伍并写入提交及积分。
+        prior_award = target_award_status(
+            db, contest["id"], target_id, flag_id, team["id"], victim_id, flag_round,
+        ) if matched else None
+        claimed_by_other = prior_award is not None and not prior_award["claimed_by_team"]
+        if prior_award is not None:
             verdict, points = "already_solved", 0
         elif matched:
             verdict, points = "correct", hit["points"]
@@ -1005,7 +1065,7 @@ def submit_target_flag(target_id):
             add_score(db, contest_id=contest["id"], team_id=team["id"], kind="attack", delta=points,
                       round_no=round_no, reason=reason, actor_id=g.user["id"], now=now)
     notice = {"puzzle_id": target_id, "verdict": verdict, "points": points, "own_flag": own_flag, "title": title,
-              "victim": victim_name, "victim_id": victim_id, "flag_round": flag_round}
+              "victim": victim_name, "victim_id": victim_id, "flag_round": flag_round, "claimed_by_other": claimed_by_other}
     session["flag_notice"] = notice
     return redirect(url_for("site.round_target", target_id=target_id), code=303)
 
