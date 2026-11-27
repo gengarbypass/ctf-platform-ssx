@@ -284,6 +284,72 @@ class PlatformTest(unittest.TestCase):
         self.assertIn("bluefox", ranking)
         self.assertNotIn("flag{fixture}", ranking)
 
+    def test_flag_rankings_break_ties_by_last_correct_submission(self):
+        puzzle_contest = self.contest("解题同分")
+        late, late_id = self.player(puzzle_contest, "alpha", "Alpha")
+        same_second, same_second_id = self.player(puzzle_contest, "mike", "Mike")
+        early, early_id = self.player(puzzle_contest, "zulu", "Zulu")
+        self.post(self.admin, "/manage/teams/new", contest_id=puzzle_contest, name="Unscored")
+        unscored_id = self.lookup("SELECT id FROM teams WHERE name = 'Unscored'")[0][0]
+        submissions = [("flag{tie50a}", 50), ("flag{tie50b}", 50), ("flag{tie100}", 100)]
+        clock = int(datetime.now().timestamp())
+        for kind in ("puzzle", "breach"):
+            with self.subTest(kind=kind):
+                if kind == "puzzle":
+                    for index, (flag, points) in enumerate(submissions, start=1):
+                        self.post(self.admin, "/manage/bank/new", join_contest=puzzle_contest, title=f"同分题 {index}",
+                                  category="Web", difficulty="入门", points=points, description="排序测试",
+                                  flag=flag, published="1")
+                    paths = [f"/challenges/{row['id']}/flag" for row in self.lookup("SELECT id FROM puzzles ORDER BY id")]
+                else:
+                    contest_id = self.contest("综合渗透同分", mode="breach")
+                    for index, (flag, points) in enumerate(submissions, start=1):
+                        self.breach_flag(contest_id, f"同分靶点 {index}", "排序测试", flag, points=points)
+                    paths = ["/breach/flag"] * len(submissions)
+
+                clock = max(clock + 9, int(datetime.now().timestamp()) + 1)
+                for offset, client, slot in ((0, late, 0), (2, early, 2), (2, same_second, 2), (4, late, 1), (7, early, 2)):
+                    with patch("time.time", return_value=clock + offset):
+                        self.post(client, paths[slot], flag=submissions[slot][0])
+                with patch("time.time", return_value=clock + 8):
+                    self.post(early, paths[2], flag="flag{incorrect}")
+                    html = early.get("/rankings").get_data(as_text=True)
+                    board = early.get(f"/api/scoreboard/{kind}").json["content"]
+
+                self.assertEqual(re.findall(r'<span class="arena-team">([^<]+)', html),
+                                 ["Zulu", "Mike", "Alpha", "Unscored"])
+                self.assertEqual([int(value) for value in re.findall(r'data-sb-team="(\d+)"', board)],
+                                 [early_id, same_second_id, late_id, unscored_id])
+                self.assertEqual([int(value) for value in re.findall(r'data-sb-player="\d+-(\d+)"', board)],
+                                 [early_id, same_second_id, late_id])
+
+    def test_awdp_rankings_break_ties_by_patch_submission_and_ledger_time(self):
+        contest_id = self.contest(mode="round")
+        late, late_id = self.player(contest_id, "alpha", "Alpha")
+        _, manual_id = self.player(contest_id, "manual", "Aardvark")
+        early, early_id = self.player(contest_id, "zulu", "Zulu")
+        task_id = self.round_task(contest_id)
+        path = f"/awdp/challenges/{task_id}/patch"
+        clock = int(datetime.now().timestamp()) + 1
+        for offset, client, version in ((0, early, "v1.1"), (1, late, "v1.2"), (2, early, "v1.3")):
+            with patch("time.time", return_value=clock + offset):
+                self.post(client, path, version=version, patch=(patch_zip(), "sample.zip"))
+        patch_ids = {row["version"]: row["id"] for row in self.lookup("SELECT id, version FROM patches")}
+        reviews = ((3, "v1.2", "passed", 100), (4, "v1.3", "passed", 20),
+                   (5, "v1.3", "rejected", 0), (6, "v1.1", "passed", 100))
+        for offset, version, status, award in reviews:
+            with patch("time.time", return_value=clock + offset):
+                self.post(self.admin, f"/manage/patches/{patch_ids[version]}", contest_id=contest_id, status=status, award=award)
+        with patch("time.time", return_value=clock + 7):
+            self.post(self.admin, "/manage/scores", contest_id=contest_id, team_id=manual_id, kind="uptime",
+                      delta=100, round_no=1, reason="可用性得分")
+            html = early.get("/rankings").get_data(as_text=True)
+            board = early.get("/api/scoreboard/round").json["content"]
+
+        self.assertEqual(re.findall(r'<span class="arena-team">([^<]+)', html), ["Zulu", "Alpha", "Aardvark"])
+        self.assertEqual([int(value) for value in re.findall(r'data-sb-team="(\d+)"', board)], [early_id, late_id, manual_id])
+        self.assertEqual([int(value) for value in re.findall(r'data-sb-player="\d+-(\d+)"', board)], [early_id, late_id])
+
     def test_patch_review_score_reversal_status_and_file_access(self):
         contest_id = self.contest(mode="round")
         player, team_id = self.player(contest_id, "bluefox", "BlueFox")

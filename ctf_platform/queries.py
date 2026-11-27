@@ -10,7 +10,7 @@ def puzzle_rankings(db, contest_id):
            FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
            LEFT JOIN flag_submissions f ON f.contest_id = ? AND f.team_id = t.id AND f.verdict = 'correct'
            WHERE ct.contest_id = ? GROUP BY t.id
-           ORDER BY points DESC, t.name COLLATE NOCASE, t.id""",
+           ORDER BY points DESC, MAX(f.submitted_at) ASC NULLS LAST, MAX(f.id), t.id""",
         (contest_id, contest_id),
     ).fetchall()
 
@@ -22,7 +22,7 @@ def puzzle_player_rankings(db, contest_id):
            FROM flag_submissions f JOIN teams t ON t.id = f.team_id LEFT JOIN users u ON u.id = f.user_id
            WHERE f.contest_id = ? AND f.verdict = 'correct'
            GROUP BY f.user_id, t.id
-           ORDER BY points DESC, solved DESC, name COLLATE NOCASE
+           ORDER BY points DESC, MAX(f.submitted_at), MAX(f.id)
            LIMIT ?""",
         (contest_id, PLAYER_BOARD_LIMIT),
     ).fetchall()
@@ -35,7 +35,8 @@ def patch_player_rankings(db, contest_id):
            FROM patches p JOIN teams t ON t.id = p.team_id LEFT JOIN users u ON u.id = p.user_id
            WHERE p.contest_id = ?
            GROUP BY p.user_id, t.id
-           ORDER BY points DESC, patches DESC, name COLLATE NOCASE
+           ORDER BY points DESC, MAX(p.submitted_at) FILTER (WHERE p.award > 0) ASC NULLS LAST,
+                    MAX(p.id) FILTER (WHERE p.award > 0), t.id, p.user_id
            LIMIT ?""",
         (contest_id, PLAYER_BOARD_LIMIT),
     ).fetchall()
@@ -47,7 +48,7 @@ def breach_rankings(db, contest_id):
            FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
            LEFT JOIN breach_submissions b ON b.contest_id = ? AND b.team_id = t.id AND b.verdict = 'correct'
            WHERE ct.contest_id = ? GROUP BY t.id
-           ORDER BY points DESC, solved DESC, t.name COLLATE NOCASE, t.id""",
+           ORDER BY points DESC, MAX(b.submitted_at) ASC NULLS LAST, MAX(b.id), t.id""",
         (contest_id, contest_id),
     ).fetchall()
 
@@ -59,7 +60,7 @@ def breach_player_rankings(db, contest_id):
            FROM breach_submissions b JOIN teams t ON t.id = b.team_id LEFT JOIN users u ON u.id = b.user_id
            WHERE b.contest_id = ? AND b.verdict = 'correct'
            GROUP BY b.user_id, t.id
-           ORDER BY points DESC, solved DESC, name COLLATE NOCASE
+           ORDER BY points DESC, MAX(b.submitted_at), MAX(b.id)
            LIMIT ?""",
         (contest_id, PLAYER_BOARD_LIMIT),
     ).fetchall()
@@ -86,8 +87,12 @@ def round_rankings(db, contest_id):
               COALESCE(SUM(s.delta), 0) AS points
            FROM contest_teams ct JOIN teams t ON t.id = ct.team_id
            LEFT JOIN score_events s ON s.contest_id = ? AND s.team_id = t.id
+           LEFT JOIN patches p ON p.contest_id = s.contest_id AND p.id = s.patch_id
            WHERE ct.contest_id = ? GROUP BY t.id
-           ORDER BY points DESC, t.name COLLATE NOCASE, t.id""",
+           ORDER BY points DESC,
+                    MAX(CASE WHEN p.id IS NULL THEN s.occurred_at
+                             WHEN p.award > 0 THEN p.submitted_at END) ASC NULLS LAST,
+                    MAX(s.id) FILTER (WHERE p.id IS NULL OR p.award > 0), t.id""",
         (contest_id, contest_id),
     ).fetchall()
 
