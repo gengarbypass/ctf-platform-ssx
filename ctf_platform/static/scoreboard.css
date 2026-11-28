@@ -130,7 +130,7 @@
     &[data-board-kind="round"] {
       padding-block-start: 16px;
       & .sb-hero { margin-top: 4px; padding-block: 4px 8px; }
-      & .sb-title { margin-block: 2px; font-size: 24px; line-height: 30px; }
+      & .sb-title { margin-block: 2px; font-size: 30px; line-height: 36px; }
       & .sb-round-panel { margin-top: 8px; padding-block: 6px; }
       & .sb-split { margin-top: 8px; }
     }
@@ -147,7 +147,7 @@
       & { font-size: 21px; padding: clamp(24px, 2vw, 56px); }
       & .sb-title { font-size: clamp(40px, 3.2vw, 76px); }
       &[data-board-kind="round"] { padding-block-start: 24px; }
-      &[data-board-kind="round"] .sb-title { font-size: 36px; line-height: 46px; }
+      &[data-board-kind="round"] .sb-title { font-size: 48px; line-height: 1; }
       & .sb-date, & .sb-overline, & .sb-clock-label { font-size: 16px; }
       & .sb-clock-value { font-size: clamp(34px, 2.4vw, 56px); }
       & .sb-status { font-size: 14px; }
@@ -187,7 +187,7 @@
     }
     @media (max-width: 615px) {
       &[data-board-kind="round"] { padding-block-start: 12px; }
-      &[data-board-kind="round"] .sb-title { font-size: 18px; line-height: 24px; }
+      &[data-board-kind="round"] .sb-title { font-size: 20px; line-height: 28px; }
       & .sb-split, & .sb-split-aside { grid-template-columns: minmax(0,1fr); }
       & .sb-hero { flex-wrap: wrap; align-items: start; gap: 7px; }
       & .sb-trophy { width: 37px; height: 37px; }
